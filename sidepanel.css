@@ -400,20 +400,6 @@ body {
   gap: 10px;
 }
 
-.cleanup-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 8px;
-  background: var(--accent-dim);
-  color: var(--accent);
-  font-family: var(--font-body);
-  font-weight: 600;
-  font-size: 10.5px;
-  border-radius: var(--r-pill);
-  border: 1px solid rgba(200, 103, 79, 0.25);
-  white-space: nowrap;
-}
-
 .section-title {
   font-family: var(--font-display);
   font-weight: 600;
@@ -446,24 +432,6 @@ body {
 .enhance-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-
-/* Clean up toggle — looks like an on/off pill when active */
-.cleanup-toggle {
-  position: relative;
-}
-
-.cleanup-toggle.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-  box-shadow: 0 2px 8px rgba(200, 103, 79, 0.3);
-}
-
-.cleanup-toggle.active:hover:not(:disabled) {
-  background: #b25742;
-  color: #fff;
-  border-color: #b25742;
 }
 
 .transcript-actions {

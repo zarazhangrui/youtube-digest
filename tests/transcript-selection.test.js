@@ -19,12 +19,12 @@ test("all timestamped transcript row clicks use the selection-aware seek helper"
   );
 
   const guardedRowHandlers = source.match(
-    /div\.addEventListener\("click", \(event\) =>\s+seekFromTranscriptEntryClick\(event, (?:group|entry)\.start\),\s+\);/g,
+    /div\.addEventListener\("click", \(event\) =>\s+seekFromTranscriptEntryClick\(event, group\.start\),\s+\);/g,
   );
   assert.equal(
     guardedRowHandlers?.length,
-    2,
-    "raw and cleaned rows must use the guard",
+    1,
+    "raw transcript rows must use the guard",
   );
   assert.match(
     source,
@@ -33,7 +33,7 @@ test("all timestamped transcript row clicks use the selection-aware seek helper"
   );
   assert.doesNotMatch(
     source,
-    /div\.addEventListener\("click", \(\) => seekTo\((?:group|entry)\.start\)\);/,
+    /div\.addEventListener\("click", \(\) => seekTo\(group\.start\)\);/,
   );
 });
 

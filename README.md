@@ -8,7 +8,7 @@ Turn every YouTube video into a resource for deep learning. YouTube Digest bring
 - Learn languages with the original transcript, a Simplified Chinese translation, or an aligned bilingual view.
 - Build understanding with an AI overview, chapters, key quotes, and selected-text explanations.
 - Navigate long videos by clicking timestamps in the transcript, overview, or notes.
-- Clean up fragmented captions and save timestamped notes for later study.
+- Save polished timestamped notes for later study.
 - Keep control of your data with your own API keys, local Chrome storage, and no analytics or telemetry.
 
 YouTube Digest is a bring-your-own-key project installed locally from GitHub. It is not available through the Chrome Web Store, does not include API credits, and does not run a developer-operated server.
@@ -49,7 +49,7 @@ Because this is an unpacked extension, it does not update automatically. After d
 YouTube Digest needs two keys under your own provider accounts:
 
 1. A **Supadata API key** to retrieve YouTube transcripts.
-2. An **AI provider API key** for overviews, cleanup, explanations, and translation.
+2. An **AI provider API key** for overviews, explanations, translation, and automatic note polishing.
 
 ### Get a Supadata API key
 
@@ -91,7 +91,7 @@ Keys and settings are stored in Chrome's local extension storage on your device.
 2. Click the YouTube Digest extension icon to open the side panel.
 3. Read the timestamped transcript, or choose **Original**, **中文**, or **双语**.
 4. Open **Overview** when you want AI-generated chapters and key quotes.
-5. Select transcript text to explain it, or choose **Clean up** to improve readability.
+5. Select transcript text when you want an AI explanation.
 6. Save a note from the player or a key quote, then revisit it from **Notes**.
 
 ## What works today
@@ -100,7 +100,7 @@ Keys and settings are stored in Chrome's local extension storage on your device.
 - Standard `youtube.com/watch` video pages.
 - Native subtitle tracks returned by Supadata. YouTube Digest prefers English when available, but may show another native language.
 - Original, Simplified Chinese, and aligned bilingual transcript views.
-- AI overviews, transcript cleanup, selected-text explanations, and note cleanup.
+- AI overviews, selected-text explanations, translation, and automatic note polishing.
 - Local notes and a local cache for recent transcript and digest results.
 
 Shorts, live streams, private or access-restricted videos, and videos without an available native transcript may not work. Firefox, Safari, mobile browsers, and other Chromium browsers are not currently tested or supported.
@@ -119,7 +119,23 @@ The [Supadata transcript documentation](https://docs.supadata.ai/get-transcript)
 
 With the current native-only behavior, the free tier can cover roughly 100 transcript lookups per month when each request succeeds once. Retries and unavailable-caption lookups also consume credits, so actual successful-video coverage can be lower.
 
-AI provider usage is separate. DeepSeek or a custom provider may apply its own free quota, rate limits, or charges. YouTube Digest does not collect payments or resell access. Set provider spending limits and monitor both accounts.
+AI provider usage is separate. DeepSeek or a custom provider may apply its own free quota, rate limits, or charges. YouTube Digest does not collect payments or resell access. Set provider spending limits and monitor both accounts. The estimate below explains the current DeepSeek translation cost.
+
+## DeepSeek V4 Flash translation cost estimate
+
+Current as of August 10, 2026, DeepSeek lists the following prices per 1 million tokens on its official [pricing page](https://api-docs.deepseek.com/quick_start/pricing/):
+
+- Cache-hit input: **$0.0028 USD**.
+- Cache-miss input: **$0.14 USD**.
+- Output: **$0.28 USD**.
+
+DeepSeek says these prices may increase soon, so check the current pricing page before relying on this estimate. Its official [token usage guide](https://api-docs.deepseek.com/quick_start/token_usage/) estimates about 0.3 token per English character and about 0.6 token per Chinese character. Its [context caching guide](https://api-docs.deepseek.com/guides/kv_cache/) explains the automatic best-effort disk cache used for repeated prefixes.
+
+A measured 20-minute English talk contained **2,935 spoken English words** and 15,433 transcript characters. With YouTube Digest's current grouping, it became 128 semantic segments and 43 requests of three segments each. Repeated prompts and JSON brought the rendered input to about 108,528 English characters, or **about 32,600 input tokens** using DeepSeek's 0.3 token per English character heuristic. The translated Chinese JSON output is estimated at about 3,500 to 4,500 tokens using the 0.6 token per Chinese character heuristic, plus JSON and ID overhead.
+
+If all input is billed as cache miss, input costs about $0.0046 and output costs about $0.0010 to $0.0013, for a total of about $0.0056 to $0.0059. When much of the repeated system prompt hits DeepSeek's automatic best-effort cache, a realistic lower end is about $0.002 to $0.003. A practical estimate for fully translating this talk is therefore **$0.002 to $0.006 USD, about ¥0.02 to ¥0.04**.
+
+Translation is lazy and progressive. Cached segments are reused, and only rows you request by scrolling into them incur calls. Retries, provider behavior, and pricing changes can increase the final cost.
 
 ## Remix it with your coding agent
 

@@ -13,7 +13,7 @@ Depending on the feature you use, YouTube Digest handles:
 - video metadata such as title, channel, description, and duration;
 - text you select in the transcript and nearby transcript context;
 - transcript context around a timestamped note;
-- content you ask to clean up or translate;
+- content you ask to translate;
 - notes you save;
 - Supadata and AI provider configuration, including API keys; and
 - cached transcript, digest, and translation results.
@@ -32,7 +32,6 @@ YouTube Digest sends content to the OpenAI-compatible provider you configure:
 - selected text plus nearby transcript context for an explanation;
 - small semantic transcript batches currently needed for progressive Chinese
   translation, or requested overview or explanation content;
-- transcript and relevant metadata for transcript cleanup; and
 - nearby transcript context and video metadata when polishing a saved note.
 
 The default provider base URL is `https://api.deepseek.com`, and the default model is `deepseek-v4-flash`. You may configure a different OpenAI-compatible base URL and model. Chrome requests access to the configured origin when you save it; if you deny that request, YouTube Digest cannot contact that provider.

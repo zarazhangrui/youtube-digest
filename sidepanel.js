@@ -21,12 +21,10 @@ let currentTranscript = null;
 let currentTranscriptText = null; // Plain text (for display/export)
 let currentTranscriptTimestamped = null; // With timestamps for AI analysis
 let currentTranscriptLanguage = null;
-let currentEnhancedTranscript = null;
 let currentVideoTitle = "";
 let currentChannelName = "";
 let currentVideoDescription = "";
 let currentVideoDuration = 0;
-let isTranscriptCleanedUp = false; // True when cleaned-up transcript is displayed
 let isAnalysisLoading = false; // Track if analysis is in progress
 let youtubeTabId = null; // Store the YouTube tab ID for reliable messaging
 let errorAction = null;
@@ -375,9 +373,6 @@ function setupEventListeners() {
 
   // Transcript actions
   document
-    .getElementById("enhanceBtn")
-    ?.addEventListener("click", toggleTranscriptCleanup);
-  document
     .getElementById("copyTranscriptBtn")
     ?.addEventListener("click", copyTranscript);
   document
@@ -550,8 +545,6 @@ async function startDigest(videoId, videoUrl) {
     currentTranscriptText = cached.transcriptText;
     currentTranscriptTimestamped = cached.transcriptTimestamped;
     currentTranscriptLanguage = cached.transcriptLanguage || null;
-    currentEnhancedTranscript = cached.enhancedTranscript || null;
-    isTranscriptCleanedUp = !!cached.enhancedTranscript;
     isAnalysisLoading = false;
 
     // Restore semantic-segment translations from persistent storage.
@@ -569,13 +562,7 @@ async function startDigest(videoId, videoUrl) {
     }
 
     // Always render transcript first
-    if (isTranscriptCleanedUp && currentEnhancedTranscript) {
-      renderCleanedUpTranscript(currentEnhancedTranscript);
-      setCleanupToggleState(true);
-    } else {
-      renderTranscript();
-      setCleanupToggleState(false);
-    }
+    renderTranscript();
 
     // Render analysis if we have it cached
     if (currentAnalysis) {
@@ -602,8 +589,6 @@ async function startDigest(videoId, videoUrl) {
   currentTranscriptText = null;
   currentTranscriptTimestamped = null;
   currentTranscriptLanguage = null;
-  currentEnhancedTranscript = null;
-  isTranscriptCleanedUp = false;
   isAnalysisLoading = false;
 
   if (currentVideoTitle || currentChannelName) {
@@ -799,14 +784,7 @@ async function saveQuoteAsNote(quote, btn) {
 function renderResults(analysis) {
   renderAnalysisResults(analysis);
 
-  // Transcript - show cleaned-up version if available and toggle is on
-  if (isTranscriptCleanedUp && currentEnhancedTranscript) {
-    renderCleanedUpTranscript(currentEnhancedTranscript);
-    setCleanupToggleState(true);
-  } else {
-    renderTranscript();
-    setCleanupToggleState(false);
-  }
+  renderTranscript();
 
   document.getElementById("tabsNav").style.display = "flex";
 
@@ -884,129 +862,12 @@ function renderTranscript() {
   startPlaybackTracking();
 }
 
-/**
- * Renders the cleaned-up transcript using the original timestamp groups.
- * Each group is cleaned individually so timestamps and click-to-seek remain.
- */
-function renderCleanedUpTranscript(cleanedEntries) {
-  if (!cleanedEntries || !cleanedEntries.length) return;
-
-  const transcriptList = document.getElementById("transcriptList");
-  transcriptList.innerHTML = "";
-
-  // Show source badge
-  const existingBadge = document.getElementById("transcriptSourceBadge");
-  if (existingBadge) existingBadge.remove();
-
-  const badge = document.createElement("div");
-  badge.id = "transcriptSourceBadge";
-  badge.className = "transcript-source-badge";
-  badge.innerHTML = `<span class="source-dot source-dot--subs"></span> From video subtitles · ${escapeHtml(getOriginalTranscriptLabel())} · cleaned up`;
-  transcriptList.parentElement.insertBefore(badge, transcriptList);
-
-  cleanedEntries.forEach((entry) => {
-    const div = document.createElement("div");
-    div.className = "transcript-entry";
-    div.dataset.seconds = entry.start;
-
-    const minutes = Math.floor(entry.start / 60);
-    const seconds = entry.start % 60;
-    const timestamp = `${minutes}:${String(seconds).padStart(2, "0")}`;
-
-    div.innerHTML = `
-      <span class="transcript-time">${timestamp}</span>
-      <span class="transcript-text">${renderSubtitleInlineMarkup(entry.text)}</span>
-    `;
-
-    div.addEventListener("click", (event) =>
-      seekFromTranscriptEntryClick(event, entry.start),
-    );
-    transcriptList.appendChild(div);
-  });
-
-  // Start tracking video playback for auto-scroll
-  startPlaybackTracking();
-}
-
-// ============================================================
-// TRANSCRIPT CLEANUP
-// ============================================================
-
-async function toggleTranscriptCleanup() {
-  if (!currentTranscriptText) return;
-
-  // If already cleaned up, turn it off and re-render original
-  if (isTranscriptCleanedUp) {
-    isTranscriptCleanedUp = false;
-    setCleanupToggleState(false);
-    clearTranslationCacheForType("transcript");
-    if (currentTranscriptMode === "original") renderTranscript();
-    else translateTranscript();
-    await updateCache();
-    return;
-  }
-
-  const enhanceBtn = document.getElementById("enhanceBtn");
-  const enhanceLabel = document.getElementById("enhanceBtnLabel");
-  enhanceBtn.disabled = true;
-  if (enhanceLabel) enhanceLabel.textContent = "Cleaning...";
-
-  try {
-    const result = await chrome.runtime.sendMessage({
-      action: "enhanceTranscript",
-      transcriptText: currentTranscriptText,
-      transcriptEntries: currentTranscript,
-      videoTitle: currentVideoTitle,
-      videoDescription: currentVideoDescription,
-    });
-
-    if (result.success) {
-      isTranscriptCleanedUp = true;
-      currentEnhancedTranscript = result.enhancedTranscript;
-      setCleanupToggleState(true);
-      // Clear transcript translation cache since content changed
-      clearTranslationCacheForType("transcript");
-      if (currentTranscriptMode === "original") {
-        renderCleanedUpTranscript(result.enhancedTranscript);
-      } else {
-        translateTranscript();
-      }
-      await updateCache(); // Save cleaned-up transcript to cache
-    } else {
-      isTranscriptCleanedUp = false;
-      setCleanupToggleState(false);
-      console.error("Cleanup failed:", result.error);
-    }
-  } catch (error) {
-    isTranscriptCleanedUp = false;
-    setCleanupToggleState(false);
-    console.error("Cleanup error:", error);
-  }
-}
-
-function setCleanupToggleState(isOn) {
-  const btn = document.getElementById("enhanceBtn");
-  const label = document.getElementById("enhanceBtnLabel");
-  const badge = document.getElementById("cleanupBadge");
-  if (!btn) return;
-
-  btn.disabled = false;
-  if (label) label.textContent = isOn ? "✓ Cleaned up" : "🧹 Clean up";
-  btn.classList.toggle("active", isOn);
-  if (badge) badge.style.display = isOn ? "inline-flex" : "none";
-}
-
 function copyTranscript() {
-  const text = isTranscriptCleanedUp
-    ? formatTranscriptForExport(currentEnhancedTranscript)
-    : currentTranscriptText || "";
-  copyToClipboardWithFeedback(text, "copyTranscriptBtn");
+  copyToClipboardWithFeedback(currentTranscriptText || "", "copyTranscriptBtn");
 }
 
 function exportTranscript() {
-  const transcriptContent = isTranscriptCleanedUp
-    ? formatTranscriptForExport(currentEnhancedTranscript)
-    : currentTranscriptText || "";
+  const transcriptContent = currentTranscriptText || "";
   const videoUrl = `https://youtube.com/watch?v=${currentVideoId}`;
 
   let exportText = "";
@@ -1028,22 +889,6 @@ function exportTranscript() {
 
   const filename = `${sanitizeFilename(currentVideoTitle)}-transcript.txt`;
   downloadTextFile(exportText, filename);
-}
-
-/**
- * Formats cleaned-up transcript entries back into plain timestamped text
- * for copy/export.
- */
-function formatTranscriptForExport(entries) {
-  if (!entries || !Array.isArray(entries)) return "";
-  return entries
-    .map((entry) => {
-      const minutes = Math.floor(entry.start / 60);
-      const seconds = entry.start % 60;
-      const timestamp = `${minutes}:${String(seconds).padStart(2, "0")}`;
-      return `[${timestamp}] ${entry.text}`;
-    })
-    .join("\n");
 }
 
 // ============================================================
@@ -1464,7 +1309,7 @@ async function showExplanation(selectedText) {
  * Gets surrounding context from the transcript for the selected text.
  */
 function getTranscriptContext(selectedText) {
-  const fullText = currentEnhancedTranscript || currentTranscriptText || "";
+  const fullText = currentTranscriptText || "";
   const index = fullText.indexOf(selectedText);
 
   if (index === -1) return "";
@@ -1504,7 +1349,6 @@ async function saveToCache(videoId) {
       transcriptText: currentTranscriptText,
       transcriptTimestamped: currentTranscriptTimestamped,
       transcriptLanguage: currentTranscriptLanguage,
-      enhancedTranscript: currentEnhancedTranscript,
       videoTitle: currentVideoTitle,
       channelName: currentChannelName,
       paragraphCache: paragraphCacheForVideo,
@@ -1743,12 +1587,9 @@ async function deleteNote(noteId) {
 
 /**
  * Starts polling the video's current time and highlighting/scrolling
- * to the matching transcript entry. Only works for raw transcripts
- * (with timestamps), not enhanced transcripts.
+ * to the matching transcript entry.
  */
 function startPlaybackTracking() {
-  // Only for raw transcripts with timestamp-based entries
-  if (isTranscriptCleanedUp) return;
   if (!currentTranscript || !currentTranscript.length) return;
 
   // Don't restart if already tracking (preserves user's auto-scroll state)
@@ -1885,18 +1726,6 @@ function onContentAreaScroll() {
   }
 }
 
-/**
- * Clears cached transcript segment translations.
- * Called when content changes (e.g., after enhancing transcript).
- *
- * @param {string} contentType - Must be 'transcript'
- */
-function clearTranslationCacheForType(contentType) {
-  if (contentType === "transcript") {
-    transcriptParagraphCache.clear();
-  }
-}
-
 // ============================================================
 // TRANSCRIPT MODE UI — Original / Chinese / aligned bilingual
 // ============================================================
@@ -1909,25 +1738,11 @@ function getOriginalTranscriptLabel() {
 }
 
 function getActiveTranscriptSegments() {
-  if (isTranscriptCleanedUp && Array.isArray(currentEnhancedTranscript)) {
-    return currentEnhancedTranscript
-      .map((entry, index) => {
-        const start = Number(entry?.start) || 0;
-        const text = normalizeCaptionText(entry?.text);
-        return {
-          id: `clean-${index}-${Math.round(start * 1000)}`,
-          start,
-          text,
-        };
-      })
-      .filter((entry) => entry.text);
-  }
   return groupTranscriptEntries(currentTranscript || []);
 }
 
 function transcriptTranslationCacheKey(segment) {
-  const sourceMode = isTranscriptCleanedUp ? "clean" : "semantic";
-  return `${currentVideoId}:zh:${sourceMode}:${segment.id}`;
+  return `${currentVideoId}:zh:semantic:${segment.id}`;
 }
 
 function setTranscriptModeButtons(mode) {
@@ -1951,11 +1766,7 @@ async function handleTranscriptModeChange(mode) {
   setTranscriptModeButtons(mode);
 
   if (mode === "original") {
-    if (isTranscriptCleanedUp && currentEnhancedTranscript) {
-      renderCleanedUpTranscript(currentEnhancedTranscript);
-    } else {
-      renderTranscript();
-    }
+    renderTranscript();
     return;
   }
 

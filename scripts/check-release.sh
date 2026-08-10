@@ -41,7 +41,6 @@ public_allowlist=(
   "prompts/analysis.md"
   "prompts/explain.md"
   "prompts/note-cleanup.md"
-  "prompts/transcript-cleanup.md"
   "prompts/translation.md"
   "README.md"
   "README.zh-CN.md"

@@ -371,12 +371,11 @@ test("all AI product requests default DeepSeek to non-thinking without affecting
   const backgroundSource = read("background.js");
   assert.equal(
     (backgroundSource.match(/await requestAiCompletion\(\{/g) || []).length,
-    5,
+    4,
   );
   assert.doesNotMatch(backgroundSource, /disableThinking/);
   for (const callPath of [
     "handleAnalyzeTranscript",
-    "enhanceSingleChunk",
     "cleanupNoteText",
     "handleExplainSelection",
     "callAiTranslation",

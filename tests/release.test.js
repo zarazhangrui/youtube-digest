@@ -67,6 +67,20 @@ test("release copy documents current scope without em dashes", () => {
   assert.match(readme, /dash\.supadata\.ai\/auth\/sign-up/i);
   assert.match(readme, /platform\.deepseek\.com\/api_keys/i);
   assert.match(readme, /api-docs\.deepseek\.com/i);
+  assert.match(readme, /api-docs\.deepseek\.com\/quick_start\/pricing/i);
+  assert.match(readme, /api-docs\.deepseek\.com\/quick_start\/token_usage/i);
+  assert.match(readme, /api-docs\.deepseek\.com\/guides\/kv_cache/i);
+  assert.match(readme, /\$0\.0028[\s\S]*\$0\.14[\s\S]*\$0\.28/);
+  assert.match(readme, /2,935 spoken English words/i);
+  assert.match(readme, /about 32,600 input tokens/i);
+  assert.match(readme, /\$0\.002[^\n]*\$0\.006 USD/i);
+  assert.match(chineseReadme, /api-docs\.deepseek\.com\/quick_start\/pricing/i);
+  assert.match(chineseReadme, /api-docs\.deepseek\.com\/quick_start\/token_usage/i);
+  assert.match(chineseReadme, /api-docs\.deepseek\.com\/guides\/kv_cache/i);
+  assert.match(chineseReadme, /\u00a50\.02[\s\S]*\u00a51[\s\S]*\u00a52/);
+  assert.match(chineseReadme, /2,935 \u4e2a\u82f1\u6587\u53e3\u8bed\u8bcd/);
+  assert.match(chineseReadme, /\u7ea6 32,600 \u4e2a\u8f93\u5165 token/);
+  assert.match(chineseReadme, /\$0\.002[^\n]*\$0\.006 USD/);
   assert.match(chineseReadme, /dash\.supadata\.ai\/auth\/sign-up/i);
   assert.match(chineseReadme, /platform\.deepseek\.com\/api_keys/i);
   assert.match(readme, /^### The Digest button is missing on a YouTube video$/m);
@@ -120,7 +134,6 @@ test("published prompt files contain runtime sections", () => {
     "prompts/analysis.md": ["System prompt", "User prompt"],
     "prompts/explain.md": ["System prompt", "User prompt"],
     "prompts/note-cleanup.md": ["System prompt", "User prompt"],
-    "prompts/transcript-cleanup.md": ["System prompt", "User prompt"],
     "prompts/translation.md": [
       "Shared base rules",
       "Chinese rules",
