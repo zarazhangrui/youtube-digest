@@ -12,8 +12,8 @@
         <div class="eyebrow">YouTube Digest</div>
         <h1>Bring your own API keys</h1>
         <p class="lede">
-          Keys stay in this Chrome profile and are sent only to the providers
-          you configure. This open-source extension has no developer server or
+          Keys stay in this Chrome profile and are sent only to Supadata and
+          DeepSeek. This open-source extension has no developer server or
           analytics.
         </p>
       </header>
@@ -43,47 +43,23 @@
 
         <section class="card">
           <h2>AI provider</h2>
-          <label for="provider">Provider</label>
-          <select id="provider" name="provider">
-            <option value="deepseek">DeepSeek V4 Flash</option>
-            <option value="custom">Custom OpenAI-compatible provider</option>
-          </select>
-
-          <div class="field-grid">
-            <div>
-              <label for="aiBaseUrl">Base URL</label>
-              <input
-                id="aiBaseUrl"
-                name="aiBaseUrl"
-                type="url"
-                autocomplete="off"
-                spellcheck="false"
-              />
-            </div>
-            <div>
-              <label for="aiModel">Model</label>
-              <input
-                id="aiModel"
-                name="aiModel"
-                type="text"
-                autocomplete="off"
-                spellcheck="false"
-              />
-            </div>
+          <div class="provider-summary" aria-label="Supported AI provider">
+            <span class="provider-name">DeepSeek V4 Flash</span>
+            <span class="provider-badge">Supported in this version</span>
           </div>
 
-          <label for="aiApiKey">AI API key</label>
+          <label for="aiApiKey">DeepSeek API key</label>
           <input
             id="aiApiKey"
             name="aiApiKey"
             type="password"
             autocomplete="off"
             spellcheck="false"
-            placeholder="Paste your AI provider key"
+            placeholder="Paste your DeepSeek key"
           />
-          <p class="help" id="providerHelp">
-            DeepSeek uses <code>https://api.deepseek.com</code> and
-            <code>deepseek-v4-flash</code>.
+          <p class="help">
+            YouTube Digest uses DeepSeek V4 Flash for overviews,
+            explanations, translation, and note polishing.
             <a
               href="https://platform.deepseek.com/api_keys"
               target="_blank"
@@ -92,9 +68,9 @@
             >.
           </p>
           <div class="privacy-note">
-            When you use AI features, the selected provider receives the video
-            transcript and relevant video context. Review that provider’s terms
-            and pricing before saving.
+            When you use AI features, DeepSeek receives the video transcript
+            and relevant video context. Review DeepSeek's terms and pricing
+            before saving.
           </div>
         </section>
 
@@ -103,6 +79,45 @@
           <span id="saveStatus" role="status" aria-live="polite"></span>
         </div>
       </form>
+
+      <details class="card customization-card">
+        <summary class="customization-summary">
+          <span class="customization-summary-copy">
+            <span class="eyebrow">Local remix</span>
+            <span class="customization-title"
+              >Want to use another AI model?</span
+            >
+            <span class="customization-purpose"
+              >Copy a safe prompt for your coding agent</span
+            >
+          </span>
+          <span class="agent-badge">Coding agent ready</span>
+        </summary>
+        <div class="customization-content">
+          <p class="help customization-copy">
+            This published version supports DeepSeek V4 Flash. You can adapt
+            your own local copy with a coding agent. Before copying, open the
+            exact YouTube Digest project folder that Chrome loaded through
+            Load unpacked in your coding agent. Then expand this section and
+            copy the prompt. For a first-time installation, optional permanent
+            locations include <code>~/Documents/youtube-digest</code> on macOS
+            or Linux, or
+            <code>%USERPROFILE%\Documents\youtube-digest</code> on Windows.
+            These are suggestions, not assumed paths. Chrome and the extension
+            cannot reliably reveal or copy the actual OS path. Never include
+            API keys in the prompt or chat. Enter them yourself only after the
+            code is ready.
+          </p>
+          <label for="customizationPrompt">Safe customization prompt</label>
+          <textarea id="customizationPrompt" readonly rows="12">Customize my local copy of YouTube Digest to use [PROVIDER] with [MODEL]. Work only in the currently open workspace. Before editing anything, verify that this workspace contains manifest.json and that its name is YouTube Digest. If verification fails, stop and tell me: "Open the exact YouTube Digest project folder that Chrome loaded through Load unpacked in your coding agent, then paste this prompt again." Do not search other folders or the whole disk, edit a guessed copy, assume an installation path, or claim that Chrome or the extension can reveal the absolute OS source path. Update the API endpoint, request format, and minimum Chrome host permissions needed for that provider. Preserve the bring-your-own-key model and local Chrome storage. Keep all API keys out of source code, commits, logs, screenshots, and this chat; after the code is ready, tell me where I should enter the key myself. Keep DeepSeek-specific fields and retries provider-scoped, update README.md, README.zh-CN.md, PRIVACY.md, SECURITY.md, and the tests, then run npm test, npm run check, and npm run package. Finally, explain how to reload the unpacked extension and test it on a real YouTube video.</textarea>
+          <div class="copy-actions">
+            <button id="copyCustomizationPromptBtn" type="button">
+              Copy customization prompt
+            </button>
+            <span id="copyStatus" role="status" aria-live="polite"></span>
+          </div>
+        </div>
+      </details>
 
       <section class="card data-card">
         <h2>Local data</h2>

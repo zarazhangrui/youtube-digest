@@ -25,12 +25,12 @@ There is no guaranteed response time or bug-bounty program. Please allow a reaso
 Examples include:
 
 - API keys or private content included in source, logs, screenshots, or release ZIPs;
-- unauthorized requests to an unapproved custom provider origin;
-- script or HTML injection through transcript, metadata, provider errors, or model output;
+- requests to network origins outside the documented YouTube, Supadata, and DeepSeek hosts;
+- script or HTML injection through transcript, metadata, service errors, or model output;
 - access to browsing data outside the documented YouTube scope;
 - unintended transmission of notes, transcripts, or credentials;
 - a dependency or release-workflow compromise; and
-- bypasses of local data deletion or provider configuration controls.
+- bypasses of local data deletion or DeepSeek configuration controls.
 
 ## User security guidance
 

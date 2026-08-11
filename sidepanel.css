@@ -1190,8 +1190,13 @@ body {
 }
 
 .notes-filter .enhance-btn:hover:not(:disabled) {
-  background: none;
+  background: transparent;
   color: var(--text-secondary);
+}
+
+.notes-filter .enhance-btn:focus-visible {
+  outline: 3px solid var(--accent-hover);
+  outline-offset: 2px;
 }
 
 .notes-filter .enhance-btn.active {
@@ -1200,7 +1205,13 @@ body {
   box-shadow: 0 2px 6px rgba(200, 103, 79, 0.3);
 }
 
-.notes-filter .enhance-btn.active:hover {
+.notes-filter .enhance-btn.active:hover:not(:disabled) {
+  background: var(--accent-hover);
+  color: white;
+}
+
+.notes-filter .enhance-btn.active:focus-visible {
+  background: var(--accent);
   color: white;
 }
 

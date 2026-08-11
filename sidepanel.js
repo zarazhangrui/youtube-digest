@@ -401,15 +401,22 @@ function setupEventListeners() {
 
   // Notes filter buttons
   document.getElementById("notesFilterThis")?.addEventListener("click", () => {
-    document.getElementById("notesFilterThis").classList.add("active");
-    document.getElementById("notesFilterAll").classList.remove("active");
+    setNotesFilter(false);
     loadNotes(currentVideoId);
   });
   document.getElementById("notesFilterAll")?.addEventListener("click", () => {
-    document.getElementById("notesFilterAll").classList.add("active");
-    document.getElementById("notesFilterThis").classList.remove("active");
+    setNotesFilter(true);
     loadNotes(null); // Load all notes
   });
+}
+
+function setNotesFilter(showAll) {
+  const thisVideoButton = document.getElementById("notesFilterThis");
+  const allNotesButton = document.getElementById("notesFilterAll");
+  thisVideoButton?.classList.toggle("active", !showAll);
+  thisVideoButton?.setAttribute("aria-pressed", String(!showAll));
+  allNotesButton?.classList.toggle("active", showAll);
+  allNotesButton?.setAttribute("aria-pressed", String(showAll));
 }
 
 // ============================================================

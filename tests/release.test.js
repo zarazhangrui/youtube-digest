@@ -16,7 +16,8 @@ test("manifest uses minimized install-time permissions", () => {
   assert.equal(manifest.options_ui.page, "options.html");
   assert.ok(!manifest.permissions.includes("activeTab"));
   assert.ok(manifest.host_permissions.includes("https://api.deepseek.com/*"));
-  assert.ok(manifest.optional_host_permissions.includes("https://*/*"));
+  assert.equal(Object.hasOwn(manifest, "optional_host_permissions"), false);
+  assert.equal(manifest.version, "1.1.4");
 });
 
 test("release copy documents current scope without em dashes", () => {
@@ -46,13 +47,41 @@ test("release copy documents current scope without em dashes", () => {
   assert.match(readme, /^## Install with your coding agent$/m);
   assert.match(
     readme,
-    /Download this for me and walk me through step by step how to install it and set it up\. Use simple terms\. https:\/\/github\.com\/zarazhangrui\/youtube-digest/,
+    /permanent folder I choose[\s\S]*tell me its exact full path[\s\S]*If I need a suggestion during this first installation[\s\S]*`~\/Documents\/youtube-digest`[\s\S]*`%USERPROFILE%\\Documents\\youtube-digest`[\s\S]*do not assume either path/,
+  );
+  assert.match(
+    readme,
+    /Moving or deleting the source folder breaks the unpacked extension until you load it again from the new location\./,
+  );
+  assert.match(
+    readme,
+    /selecting the exact project folder you chose in Chrome with \*\*Load unpacked\*\*/,
+  );
+  assert.match(
+    readme,
+    /Select the exact project folder you chose, which must contain `manifest\.json`/,
   );
   assert.match(readme, /upstream issues and pull requests are not accepted/i);
   assert.doesNotMatch(readme, /^## Contributing$/m);
   assert.match(chineseReadme, /^# YouTube Digest$/m);
   assert.match(chineseReadme, /把每个 YouTube 视频变成一份可以深入学习的资料/);
   assert.match(chineseReadme, /^## 让你的编程 Agent 帮你安装$/m);
+  assert.match(
+    chineseReadme,
+    /我选择的长期保留文件夹[\s\S]*告诉我准确的完整路径[\s\S]*第一次安装时需要位置建议[\s\S]*`~\/Documents\/youtube-digest`[\s\S]*`%USERPROFILE%\\Documents\\youtube-digest`[\s\S]*不要假设我一定使用这些路径/,
+  );
+  assert.match(
+    chineseReadme,
+    /如果移动或删除源代码文件夹，Chrome 中加载的扩展会失效，需要从新的位置重新加载。/,
+  );
+  assert.match(
+    chineseReadme,
+    /“加载已解压的扩展程序”选择你刚才确定的那个准确项目文件夹/,
+  );
+  assert.match(
+    chineseReadme,
+    /选择你刚才确定的那个准确项目文件夹，其中必须包含 `manifest\.json`/,
+  );
   assert.match(chineseReadme, /不接受上游 Issue 或 Pull Request/);
   assert.match(chineseReadme, /增加更多翻译语言/);
 
@@ -90,15 +119,94 @@ test("release copy documents current scope without em dashes", () => {
   );
 
   const optionsPage = read("options.html");
+  const optionsStyles = read("options.css");
   const optionsScript = read("options.js");
   assert.match(optionsPage, /dash\.supadata\.ai\/auth\/sign-up/i);
   assert.match(optionsPage, /platform\.deepseek\.com\/api_keys/i);
-  assert.match(optionsScript, /platform\.deepseek\.com\/api_keys/i);
+  assert.doesNotMatch(optionsPage, /<select\b/i);
+  assert.doesNotMatch(optionsPage, /id="(?:provider|aiBaseUrl|aiModel)"/);
+  const detailsTag = optionsPage.match(
+    /<details\b[^>]*class="card customization-card"[^>]*>/,
+  );
+  assert.ok(detailsTag, "Expected a native Local remix details disclosure");
+  assert.doesNotMatch(detailsTag[0], /\sopen(?:\s|=|>)/i);
+  assert.match(
+    optionsPage,
+    /<summary class="customization-summary">[\s\S]*Want to use another AI model\?[\s\S]*Copy a safe prompt for your coding agent[\s\S]*<\/summary>/,
+  );
+  assert.match(
+    optionsPage,
+    /Before copying, open the[\s\S]*exact YouTube Digest project folder that Chrome loaded through[\s\S]*Load unpacked[\s\S]*For a first-time installation, optional permanent[\s\S]*~\/Documents\/youtube-digest[\s\S]*%USERPROFILE%\\Documents\\youtube-digest[\s\S]*suggestions, not assumed paths/,
+  );
+  assert.match(
+    optionsPage,
+    /Chrome and the extension[\s\S]*cannot reliably reveal or copy the actual OS path/,
+  );
+  assert.match(optionsPage, /id="copyCustomizationPromptBtn"/);
+  assert.match(optionsStyles, /\.customization-summary:hover\s*\{/);
+  assert.match(optionsStyles, /\.customization-summary:focus-visible\s*\{/);
+  assert.match(optionsStyles, /\.data-card\s*\{[^}]*margin-top:\s*36px;/);
+  assert.match(optionsScript, /navigator\.clipboard\.writeText/);
+  assert.match(optionsScript, /Customization prompt copied\./);
+  assert.match(optionsScript, /migration\.migrated[\s\S]*chrome\.storage\.local\.set/);
+
+  const customizationPrompt = `Customize my local copy of YouTube Digest to use [PROVIDER] with [MODEL]. Work only in the currently open workspace. Before editing anything, verify that this workspace contains manifest.json and that its name is YouTube Digest. If verification fails, stop and tell me: "Open the exact YouTube Digest project folder that Chrome loaded through Load unpacked in your coding agent, then paste this prompt again." Do not search other folders or the whole disk, edit a guessed copy, assume an installation path, or claim that Chrome or the extension can reveal the absolute OS source path. Update the API endpoint, request format, and minimum Chrome host permissions needed for that provider. Preserve the bring-your-own-key model and local Chrome storage. Keep all API keys out of source code, commits, logs, screenshots, and this chat; after the code is ready, tell me where I should enter the key myself. Keep DeepSeek-specific fields and retries provider-scoped, update README.md, README.zh-CN.md, PRIVACY.md, SECURITY.md, and the tests, then run npm test, npm run check, and npm run package. Finally, explain how to reload the unpacked extension and test it on a real YouTube video.`;
+  assert.ok(optionsPage.includes(`>${customizationPrompt}</textarea>`));
+  assert.doesNotMatch(customizationPrompt, /Documents|USERPROFILE/);
 
   assert.match(readme, /^## Remix it with your coding agent$/m);
   assert.match(readme, /more translation languages/i);
   assert.match(readme, /customized summary templates/i);
   assert.match(readme, /vocabulary notebook/i);
+  assert.match(
+    readme,
+    /first open the exact YouTube Digest project folder that Chrome loaded through \*\*Load unpacked\*\* in your coding agent/,
+  );
+  assert.match(
+    chineseReadme,
+    /先在编程 Agent 中打开 Chrome 通过“加载已解压的扩展程序”使用的那个准确的 YouTube Digest 项目文件夹/,
+  );
+
+  const publishedDocs = [
+    readme,
+    chineseReadme,
+    read("PRIVACY.md"),
+    read("SECURITY.md"),
+  ].join("\n");
+  assert.doesNotMatch(publishedDocs, /custom OpenAI-compatible/i);
+  assert.doesNotMatch(publishedDocs, /optional custom-origin/i);
+  assert.doesNotMatch(publishedDocs, /chosen AI provider/i);
+  assert.doesNotMatch(publishedDocs, /configure a different OpenAI-compatible/i);
+  assert.match(readme, /published version supports DeepSeek V4 Flash as its only AI provider/i);
+  assert.match(chineseReadme, /发布版本只支持 DeepSeek V4 Flash/);
+});
+
+test("notes filters preserve selected contrast and expose pressed state", () => {
+  const html = read("sidepanel.html");
+  const css = read("sidepanel.css");
+  const js = read("sidepanel.js");
+
+  assert.match(
+    html,
+    /id="notesFilterThis"[\s\S]*?aria-pressed="true"[\s\S]*?>[\s\S]*?This Video/,
+  );
+  assert.match(
+    html,
+    /id="notesFilterAll"[\s\S]*?aria-pressed="false"[\s\S]*?>[\s\S]*?All Notes/,
+  );
+  assert.match(
+    css,
+    /\.notes-filter \.enhance-btn\.active:hover:not\(:disabled\)\s*\{[^}]*background:\s*var\(--accent-hover\);[^}]*color:\s*white;/,
+  );
+  assert.match(
+    css,
+    /\.notes-filter \.enhance-btn:hover:not\(:disabled\)\s*\{[^}]*background:\s*transparent;[^}]*color:\s*var\(--text-secondary\);/,
+  );
+  assert.match(css, /\.notes-filter \.enhance-btn:focus-visible\s*\{[^}]*outline:/);
+  assert.match(js, /setNotesFilter\(false\)/);
+  assert.match(js, /setNotesFilter\(true\)/);
+  assert.match(js, /setAttribute\("aria-pressed", String\(!showAll\)\)/);
+  assert.match(js, /setAttribute\("aria-pressed", String\(showAll\)\)/);
 });
 
 test("runtime has no source-file credential dependency or retired model", () => {

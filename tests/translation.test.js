@@ -329,7 +329,7 @@ test("background rejects unsupported language fallthrough and malformed batches"
   );
 });
 
-test("all AI product requests default DeepSeek to non-thinking without affecting custom providers", async () => {
+test("all AI product requests use DeepSeek non-thinking and JSON behavior", async () => {
   const deepSeekRequests = [];
   const successfulFetch = (requests) => async (_url, options) => {
     requests.push(JSON.parse(options.body));
@@ -346,27 +346,14 @@ test("all AI product requests default DeepSeek to non-thinking without affecting
   });
   const deepSeekResult = await deepSeek.requestAiCompletion({
     maxTokens: 128,
+    responseFormat: { type: "json_object" },
     messages: [{ role: "user", content: "Hello." }],
   });
   assert.equal(deepSeekResult.text, "translated");
   assert.deepEqual(deepSeekRequests[0].thinking, { type: "disabled" });
-
-  const customRequests = [];
-  const custom = loadBackgroundHelpers({
-    settings: {
-      provider: "custom",
-      aiApiKey: "test-key",
-      aiBaseUrl: "https://example.com/v1",
-      aiModel: "compatible-model",
-    },
-    fetchImpl: successfulFetch(customRequests),
+  assert.deepEqual(deepSeekRequests[0].response_format, {
+    type: "json_object",
   });
-  const customResult = await custom.requestAiCompletion({
-    maxTokens: 128,
-    messages: [{ role: "user", content: "Hello." }],
-  });
-  assert.equal(customResult.text, "translated");
-  assert.equal(Object.hasOwn(customRequests[0], "thinking"), false);
 
   const backgroundSource = read("background.js");
   assert.equal(
@@ -541,37 +528,6 @@ test("DeepSeek retries one empty transcript JSON response without response_forma
   assert.deepEqual(requests[0].response_format, { type: "json_object" });
   assert.equal(Object.hasOwn(requests[1], "response_format"), false);
   assert.equal(requests[0].max_tokens, 1536);
-});
-
-test("custom providers do not retry an empty transcript response", async () => {
-  let requestCount = 0;
-  const helpers = loadBackgroundHelpers({
-    settings: {
-      provider: "custom",
-      aiApiKey: "test-key",
-      aiBaseUrl: "https://example.com/v1",
-      aiModel: "compatible-model",
-    },
-    fetchImpl: async (url) => {
-      if (url.startsWith("chrome-extension://")) {
-        return { ok: true, text: async () => read("prompts/translation.md") };
-      }
-      requestCount += 1;
-      return {
-        ok: true,
-        json: async () => ({ choices: [{ message: { content: "" } }] }),
-      };
-    },
-  });
-  const result = await helpers.handleTranslateContent(
-    { segments: [{ id: "segment-0-0", text: "English source sentence." }] },
-    "transcriptBatch",
-    "zh",
-    "Video",
-  );
-  assert.equal(result.success, false);
-  assert.equal(result.code, "EMPTY_AI_RESPONSE");
-  assert.equal(requestCount, 1);
 });
 
 test("translation message watchdog rejects, clears its timer, and ignores late replies", async () => {

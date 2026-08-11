@@ -1,16 +1,17 @@
 const form = document.getElementById("settingsForm");
-const providerSelect = document.getElementById("provider");
-const aiBaseUrlInput = document.getElementById("aiBaseUrl");
-const aiModelInput = document.getElementById("aiModel");
 const aiApiKeyInput = document.getElementById("aiApiKey");
 const supadataApiKeyInput = document.getElementById("supadataApiKey");
-const providerHelp = document.getElementById("providerHelp");
+const customizationPrompt = document.getElementById("customizationPrompt");
+const copyCustomizationPromptBtn = document.getElementById(
+  "copyCustomizationPromptBtn",
+);
+const copyStatus = document.getElementById("copyStatus");
 const saveStatus = document.getElementById("saveStatus");
 const dataStatus = document.getElementById("dataStatus");
 
 document.addEventListener("DOMContentLoaded", loadSettings);
-providerSelect.addEventListener("change", updateProviderFields);
 form.addEventListener("submit", saveSettings);
+copyCustomizationPromptBtn.addEventListener("click", copyCustomizationPrompt);
 document
   .getElementById("clearCacheBtn")
   .addEventListener("click", clearCachedDigests);
@@ -21,29 +22,19 @@ document.getElementById("resetBtn").addEventListener("click", resetAllData);
 
 async function loadSettings() {
   const stored = await chrome.storage.local.get(YTD_SETTINGS.STORAGE_KEY);
-  const settings = YTD_SETTINGS.normalize(stored[YTD_SETTINGS.STORAGE_KEY]);
+  const migration = YTD_SETTINGS.migrateLegacyCustom(
+    stored[YTD_SETTINGS.STORAGE_KEY],
+  );
+  const settings = migration.settings;
 
-  providerSelect.value = settings.provider;
-  aiBaseUrlInput.value = settings.aiBaseUrl || YTD_SETTINGS.DEFAULTS.aiBaseUrl;
-  aiModelInput.value = settings.aiModel || YTD_SETTINGS.DEFAULTS.aiModel;
   aiApiKeyInput.value = settings.aiApiKey;
   supadataApiKeyInput.value = settings.supadataApiKey;
-  updateProviderFields();
-}
-
-function updateProviderFields() {
-  const isDeepSeek = providerSelect.value === "deepseek";
-  aiBaseUrlInput.disabled = isDeepSeek;
-  aiModelInput.disabled = isDeepSeek;
-
-  if (isDeepSeek) {
-    aiBaseUrlInput.value = YTD_SETTINGS.DEFAULTS.aiBaseUrl;
-    aiModelInput.value = YTD_SETTINGS.DEFAULTS.aiModel;
-    providerHelp.innerHTML =
-      'DeepSeek uses <code>https://api.deepseek.com</code> and <code>deepseek-v4-flash</code>. <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer">Create a DeepSeek API key</a>.';
-  } else {
-    providerHelp.textContent =
-      "Enter an OpenAI-compatible base URL and model identifier. HTTPS is required except for localhost.";
+  if (migration.migrated) {
+    await chrome.storage.local.set({
+      [YTD_SETTINGS.STORAGE_KEY]: settings,
+    });
+    saveStatus.textContent =
+      "Custom provider settings were removed safely. Your Supadata key was kept, but the AI key was cleared. Enter a DeepSeek API key to continue.";
   }
 }
 
@@ -53,9 +44,6 @@ async function saveSettings(event) {
 
   try {
     const settings = YTD_SETTINGS.normalize({
-      provider: providerSelect.value,
-      aiBaseUrl: aiBaseUrlInput.value,
-      aiModel: aiModelInput.value,
       aiApiKey: aiApiKeyInput.value,
       supadataApiKey: supadataApiKeyInput.value,
     });
@@ -64,49 +52,27 @@ async function saveSettings(event) {
       throw new Error("Add a Supadata API key.");
     }
     if (!settings.aiApiKey) {
-      throw new Error("Add an AI provider API key.");
+      throw new Error("Add a DeepSeek API key.");
     }
-    if (!settings.aiModel) {
-      throw new Error("Add an AI model identifier.");
-    }
-
-    YTD_SETTINGS.chatCompletionsUrl(settings.aiBaseUrl);
-
-    if (settings.provider === "custom") {
-      const origin = YTD_SETTINGS.permissionPattern(settings.aiBaseUrl);
-      const granted = await chrome.permissions.request({ origins: [origin] });
-      if (!granted) {
-        throw new Error(`Host access was not granted for ${origin}`);
-      }
-    }
-
-    const previousStored = await chrome.storage.local.get(
-      YTD_SETTINGS.STORAGE_KEY,
-    );
-    const previousSettings = YTD_SETTINGS.normalize(
-      previousStored[YTD_SETTINGS.STORAGE_KEY],
-    );
 
     await chrome.storage.local.set({
       [YTD_SETTINGS.STORAGE_KEY]: settings,
     });
 
-    if (previousSettings.provider === "custom") {
-      const previousOrigin = YTD_SETTINGS.permissionPattern(
-        previousSettings.aiBaseUrl,
-      );
-      const nextOrigin =
-        settings.provider === "custom"
-          ? YTD_SETTINGS.permissionPattern(settings.aiBaseUrl)
-          : null;
-      if (previousOrigin !== nextOrigin) {
-        await chrome.permissions.remove({ origins: [previousOrigin] });
-      }
-    }
-
     saveStatus.textContent = "Saved. Reopen YouTube Digest to use these settings.";
   } catch (error) {
     saveStatus.textContent = error.message;
+  }
+}
+
+async function copyCustomizationPrompt() {
+  copyStatus.textContent = "Copying…";
+  try {
+    await navigator.clipboard.writeText(customizationPrompt.value);
+    copyStatus.textContent = "Customization prompt copied.";
+  } catch (_error) {
+    copyStatus.textContent =
+      "Could not copy the prompt. Select the prompt text and copy it manually.";
   }
 }
 
@@ -128,14 +94,7 @@ async function resetAllData() {
   );
   if (!confirmed) return;
 
-  const stored = await chrome.storage.local.get(YTD_SETTINGS.STORAGE_KEY);
-  const settings = YTD_SETTINGS.normalize(stored[YTD_SETTINGS.STORAGE_KEY]);
   await chrome.storage.local.clear();
-  if (settings.provider === "custom") {
-    await chrome.permissions.remove({
-      origins: [YTD_SETTINGS.permissionPattern(settings.aiBaseUrl)],
-    });
-  }
   await loadSettings();
   dataStatus.textContent = "All YouTube Digest data was deleted.";
 }

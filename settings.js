@@ -14,54 +14,36 @@ var YTD_SETTINGS = (() => {
     supadataApiKey: "",
   });
 
+  function isLegacyCustom(input) {
+    return !!input && input.provider === "custom";
+  }
+
   function normalize(input = {}) {
-    const provider = input.provider === "custom" ? "custom" : "deepseek";
-    const normalized = {
-      provider,
-      aiApiKey:
-        typeof input.aiApiKey === "string" ? input.aiApiKey.trim() : "",
-      aiBaseUrl:
-        typeof input.aiBaseUrl === "string" ? input.aiBaseUrl.trim() : "",
-      aiModel: typeof input.aiModel === "string" ? input.aiModel.trim() : "",
+    return {
+      provider: DEFAULTS.provider,
+      aiApiKey: isLegacyCustom(input)
+        ? ""
+        : typeof input.aiApiKey === "string"
+          ? input.aiApiKey.trim()
+          : "",
+      aiBaseUrl: DEFAULTS.aiBaseUrl,
+      aiModel: DEFAULTS.aiModel,
       supadataApiKey:
         typeof input.supadataApiKey === "string"
           ? input.supadataApiKey.trim()
           : "",
     };
-
-    if (provider === "deepseek") {
-      normalized.aiBaseUrl = DEFAULTS.aiBaseUrl;
-      normalized.aiModel = DEFAULTS.aiModel;
-    }
-
-    return normalized;
   }
 
-  function chatCompletionsUrl(baseUrl) {
-    const trimmed = String(baseUrl || "").trim().replace(/\/+$/, "");
-    if (!trimmed) throw new Error("AI provider base URL is required.");
-
-    const parsed = new URL(trimmed);
-    if (parsed.username || parsed.password || parsed.search || parsed.hash) {
-      throw new Error(
-        "AI provider base URL cannot contain credentials, query parameters, or a fragment.",
-      );
-    }
-    const isLocal =
-      parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
-    if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && isLocal)) {
-      throw new Error(
-        "Use HTTPS for remote AI providers. HTTP is allowed only for localhost.",
-      );
-    }
-
-    if (parsed.pathname.endsWith("/chat/completions")) return parsed.toString();
-    return `${trimmed}/chat/completions`;
+  function migrateLegacyCustom(input = {}) {
+    return {
+      settings: normalize(input),
+      migrated: isLegacyCustom(input),
+    };
   }
 
-  function permissionPattern(baseUrl) {
-    const endpoint = new URL(chatCompletionsUrl(baseUrl));
-    return `${endpoint.origin}/*`;
+  function chatCompletionsUrl() {
+    return `${DEFAULTS.aiBaseUrl}/chat/completions`;
   }
 
   function canonicalYouTubeUrl(videoId) {
@@ -75,9 +57,10 @@ var YTD_SETTINGS = (() => {
   return {
     STORAGE_KEY,
     DEFAULTS,
+    isLegacyCustom,
     normalize,
+    migrateLegacyCustom,
     chatCompletionsUrl,
-    permissionPattern,
     canonicalYouTubeUrl,
   };
 })();

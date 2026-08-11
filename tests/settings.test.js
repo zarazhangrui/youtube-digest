@@ -5,50 +5,50 @@ const settings = require("../settings.js");
 
 test("DeepSeek defaults use V4 Flash", () => {
   const normalized = settings.normalize({
-    provider: "deepseek",
+    provider: "unexpected",
     aiApiKey: "  example-key  ",
+    aiBaseUrl: "https://api.example.com/v1",
+    aiModel: "example-model",
     supadataApiKey: "  example-supadata  ",
   });
 
+  assert.equal(normalized.provider, "deepseek");
   assert.equal(normalized.aiBaseUrl, "https://api.deepseek.com");
   assert.equal(normalized.aiModel, "deepseek-v4-flash");
   assert.equal(normalized.aiApiKey, "example-key");
   assert.equal(normalized.supadataApiKey, "example-supadata");
+  assert.equal(
+    settings.chatCompletionsUrl(),
+    "https://api.deepseek.com/chat/completions",
+  );
 });
 
-test("custom OpenAI-compatible settings are preserved", () => {
-  const normalized = settings.normalize({
+test("legacy custom migration clears only the AI key and is idempotent", () => {
+  const legacy = {
     provider: "custom",
-    aiBaseUrl: " https://api.example.com/v1/ ",
-    aiModel: " example-model ",
+    aiApiKey: "custom-secret",
+    aiBaseUrl: "https://api.example.com/v1",
+    aiModel: "example-model",
+    supadataApiKey: " supadata-secret ",
+  };
+  const first = settings.migrateLegacyCustom(legacy);
+
+  assert.equal(first.migrated, true);
+  assert.equal(first.settings.provider, "deepseek");
+  assert.equal(first.settings.aiBaseUrl, settings.DEFAULTS.aiBaseUrl);
+  assert.equal(first.settings.aiModel, settings.DEFAULTS.aiModel);
+  assert.equal(first.settings.aiApiKey, "");
+  assert.equal(first.settings.supadataApiKey, "supadata-secret");
+
+  const second = settings.migrateLegacyCustom(first.settings);
+  assert.equal(second.migrated, false);
+  assert.deepEqual(second.settings, first.settings);
+
+  const configuredDeepSeek = settings.normalize({
+    ...first.settings,
+    aiApiKey: "new-deepseek-key",
   });
-
-  assert.equal(normalized.provider, "custom");
-  assert.equal(normalized.aiBaseUrl, "https://api.example.com/v1/");
-  assert.equal(normalized.aiModel, "example-model");
-  assert.equal(
-    settings.chatCompletionsUrl(normalized.aiBaseUrl),
-    "https://api.example.com/v1/chat/completions",
-  );
-  assert.equal(
-    settings.permissionPattern(normalized.aiBaseUrl),
-    "https://api.example.com/*",
-  );
-});
-
-test("remote custom providers must use HTTPS", () => {
-  assert.throws(
-    () => settings.chatCompletionsUrl("http://api.example.com/v1"),
-    /Use HTTPS/,
-  );
-  assert.equal(
-    settings.chatCompletionsUrl("http://localhost:11434/v1"),
-    "http://localhost:11434/v1/chat/completions",
-  );
-  assert.throws(
-    () => settings.chatCompletionsUrl("https://user:pass@api.example.com/v1"),
-    /cannot contain credentials/,
-  );
+  assert.equal(configuredDeepSeek.aiApiKey, "new-deepseek-key");
 });
 
 test("Supadata receives a canonical YouTube URL", () => {
