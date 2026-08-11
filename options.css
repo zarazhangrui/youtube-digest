@@ -136,6 +136,10 @@ a {
   gap: 10px;
 }
 
+.data-actions {
+  margin-top: 18px;
+}
+
 button {
   padding: 10px 15px;
   border: 1px solid var(--border);
