@@ -22,7 +22,7 @@ You do not need to understand the code or use the command line. Send this messag
 Your agent should:
 
 1. Ask where you want to keep the project, download or clone it there, and tell you the exact full path. If you want a suggestion, it can offer `~/Documents/youtube-digest` on macOS or Linux, or `%USERPROFILE%\Documents\youtube-digest` on Windows.
-2. Open the official Supadata and DeepSeek pages below and help you create your own accounts.
+2. Open the official DeepSeek page below and help me create my own account. A Supadata account is optional, the extension extracts captions from the YouTube page locally and only falls back to Supadata when that fails.
 3. Walk you through selecting the exact project folder you chose in Chrome with **Load unpacked**.
 4. Show you where to enter your API keys in the extension's **Settings** page.
 5. Open a YouTube video with captions and confirm the transcript and translation work.
@@ -48,12 +48,13 @@ Because this is an unpacked extension, it does not update automatically. After d
 
 ## Set up your API keys
 
-YouTube Digest needs two keys under your own provider accounts:
+YouTube Digest needs a **DeepSeek API key** for overviews, explanations, translation, and automatic note polishing. A **Supadata API key is optional**: captions are extracted directly from the YouTube page in your browser, and Supadata is only used as a fallback when local extraction fails.
 
-1. A **Supadata API key** to retrieve YouTube transcripts.
-2. A **DeepSeek API key** for overviews, explanations, translation, and automatic note polishing.
+### How transcripts are fetched
 
-### Get a Supadata API key
+YouTube Digest reads the caption tracks from the YouTube page's own player state and fetches the subtitles from YouTube's timedtext endpoint, the same data the player shows with captions on. This needs no API key and uses no credits. If that fails, it falls back to the Supadata API (below).
+
+### Get a Supadata API key (optional fallback)
 
 1. Open the official [Supadata sign-up page](https://dash.supadata.ai/auth/sign-up).
 2. Create an account and complete the short onboarding flow.
@@ -100,7 +101,7 @@ Keys and settings are stored in Chrome's local extension storage on your device.
 
 - Google Chrome 116 or newer, using the Side Panel API.
 - Standard `youtube.com/watch` video pages.
-- Native subtitle tracks returned by Supadata. YouTube Digest prefers English when available, but may show another native language.
+- Native subtitle tracks from the page itself, or from Supadata when local extraction fails. YouTube Digest prefers English when available, but may show another native language.
 - Original, Simplified Chinese, and aligned bilingual transcript views.
 - AI overviews, selected-text explanations, translation, and automatic note polishing.
 - Local notes and a local cache for recent transcript and digest results.
@@ -108,11 +109,11 @@ Keys and settings are stored in Chrome's local extension storage on your device.
 
 Shorts, live streams, private or access-restricted videos, and videos without an available native transcript may not work. Firefox, Safari, mobile browsers, and other Chromium browsers are not currently tested or supported.
 
-YouTube Digest forces Supadata's `mode=native`. It does not request AI-generated transcripts or perform local audio transcription when native captions are unavailable.
+YouTube Digest fetches native captions only. It never requests AI-generated transcripts or performs local audio transcription when native captions are unavailable. The Supadata fallback forces `mode=native` for the same reason.
 
 ## Supadata free tier and request costs
 
-Current as of August 9, 2026, the [Supadata pricing page](https://supadata.ai/pricing) lists a free tier with **100 credits per month**, no credit card required. Unused credits do not roll over. Supadata pricing can change, so check the current page before relying on these numbers.
+Local extraction means Supadata is not called for most videos, so the free tier usually covers plenty of fallback lookups. Current as of August 9, 2026, the [Supadata pricing page](https://supadata.ai/pricing) lists a free tier with **100 credits per month**, no credit card required. Unused credits do not roll over. Supadata pricing can change, so check the current page before relying on these numbers.
 
 The [Supadata transcript documentation](https://docs.supadata.ai/get-transcript) describes the transcript request modes and credit behavior:
 
@@ -162,7 +163,7 @@ If you want another AI provider or model, first open the exact YouTube Digest pr
 
 YouTube Digest makes provider requests directly from the extension:
 
-1. It sends a canonical YouTube watch URL to Supadata to request the native transcript.
+1. It reads the caption tracks from the YouTube page and fetches the subtitles from YouTube's timedtext endpoint in your browser. Only when that fails does it send a canonical YouTube watch URL to Supadata to request the native transcript.
 2. It sends the transcript and relevant video metadata to DeepSeek when you request AI features.
 3. Focused features send only the content they need, such as selected text with context or small transcript batches for translation.
 4. It stores keys, settings, notes, and recent cache entries locally in Chrome.
@@ -188,14 +189,14 @@ There is no YouTube Digest account system, advertising, analytics, or telemetry.
 
 ### YouTube Digest asks for setup
 
-- Open **Settings** and save both a Supadata key and a DeepSeek key.
+- Open **Settings** and save a DeepSeek key. A Supadata key is optional, captions are extracted from the YouTube page locally first.
 - This published version uses the fixed DeepSeek V4 Flash endpoint and model. There are no Base URL or Model fields to configure.
 - If Settings says a legacy custom provider was removed, enter a DeepSeek key. The old AI key was cleared so it could not be reused with the wrong service.
 
 ### No transcript is found
 
 - Confirm the video is public and has native captions.
-- Check your Supadata key, remaining credits, rate limit, and account status.
+- If you are relying on the Supadata fallback, check your Supadata key, remaining credits, rate limit, and account status.
 - Remember that unavailable native lookups and manual retries may still consume credits.
 
 YouTube Digest will not fall back to generated transcription.

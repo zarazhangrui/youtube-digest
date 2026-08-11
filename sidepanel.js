@@ -237,7 +237,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     action: "checkConfig",
   });
 
-  if (!configStatus.hasSupadataKey || !configStatus.hasAiKey) {
+  // Supadata is an optional fallback: the transcript is extracted from the
+  // YouTube page locally when possible, so only the AI key is required.
+  if (!configStatus.hasAiKey) {
     showConfigError(configStatus);
     return;
   }
@@ -611,16 +613,10 @@ async function startDigest(videoId, videoUrl) {
   const transcriptResult = await chrome.runtime.sendMessage({
     action: "fetchTranscript",
     videoId: videoId,
+    tabId: youtubeTabId,
   });
 
   if (!transcriptResult.success) {
-    if (transcriptResult.error === "NO_SUPADATA_KEY") {
-      showError(
-        "API key missing",
-        "Add your Supadata API key in YouTube Digest Settings.",
-      );
-      return;
-    }
     showError(
       "No transcript found",
       transcriptResult.message || transcriptResult.error,
@@ -941,7 +937,6 @@ function showError(title, message) {
 
 function showConfigError(configStatus) {
   const missingKeys = [];
-  if (!configStatus.hasSupadataKey) missingKeys.push("Supadata");
   if (!configStatus.hasAiKey) missingKeys.push("AI provider");
 
   showState("error");
