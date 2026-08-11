@@ -17,7 +17,7 @@ test("manifest uses minimized install-time permissions", () => {
   assert.ok(!manifest.permissions.includes("activeTab"));
   assert.ok(manifest.host_permissions.includes("https://api.deepseek.com/*"));
   assert.equal(Object.hasOwn(manifest, "optional_host_permissions"), false);
-  assert.equal(manifest.version, "1.1.4");
+  assert.equal(manifest.version, "1.1.5");
 });
 
 test("release copy documents current scope without em dashes", () => {
@@ -132,25 +132,27 @@ test("release copy documents current scope without em dashes", () => {
   assert.doesNotMatch(detailsTag[0], /\sopen(?:\s|=|>)/i);
   assert.match(
     optionsPage,
-    /<summary class="customization-summary">[\s\S]*Want to use another AI model\?[\s\S]*Copy a safe prompt for your coding agent[\s\S]*<\/summary>/,
+    /<summary class="customization-summary">[\s\S]*Want to use another AI model\?[\s\S]*Edit and copy a safe prompt for your coding agent[\s\S]*<\/summary>/,
   );
   assert.match(
     optionsPage,
-    /Before copying, open the[\s\S]*exact YouTube Digest project folder that Chrome loaded through[\s\S]*Load unpacked[\s\S]*For a first-time installation, optional permanent[\s\S]*~\/Documents\/youtube-digest[\s\S]*%USERPROFILE%\\Documents\\youtube-digest[\s\S]*suggestions, not assumed paths/,
+    /class="customization-steps"[\s\S]*Open the extracted YouTube Digest project folder in your coding[\s\S]*Replace \[PROVIDER\] and \[MODEL\][\s\S]*Never include API keys[\s\S]*<\/ol>/,
   );
   assert.match(
     optionsPage,
-    /Chrome and the extension[\s\S]*cannot reliably reveal or copy the actual OS path/,
+    /class="prompt-reminder"[\s\S]*Before copying, replace \[PROVIDER\] and \[MODEL\]/,
   );
+  assert.doesNotMatch(optionsPage, /~\/Documents\/youtube-digest/);
+  assert.doesNotMatch(optionsPage, /%USERPROFILE%\\Documents\\youtube-digest/);
   assert.match(optionsPage, /id="copyCustomizationPromptBtn"/);
   assert.match(optionsStyles, /\.customization-summary:hover\s*\{/);
   assert.match(optionsStyles, /\.customization-summary:focus-visible\s*\{/);
   assert.match(optionsStyles, /\.data-card\s*\{[^}]*margin-top:\s*36px;/);
-  assert.match(optionsScript, /navigator\.clipboard\.writeText/);
-  assert.match(optionsScript, /Customization prompt copied\./);
-  assert.match(optionsScript, /migration\.migrated[\s\S]*chrome\.storage\.local\.set/);
+  assert.match(optionsScript, /clipboard\.writeText/);
+  assert.match(optionsScript, /Edited prompt copied\./);
+  assert.match(optionsScript, /migration\.migrated[\s\S]*storage\.set/);
 
-  const customizationPrompt = `Customize my local copy of YouTube Digest to use [PROVIDER] with [MODEL]. Work only in the currently open workspace. Before editing anything, verify that this workspace contains manifest.json and that its name is YouTube Digest. If verification fails, stop and tell me: "Open the exact YouTube Digest project folder that Chrome loaded through Load unpacked in your coding agent, then paste this prompt again." Do not search other folders or the whole disk, edit a guessed copy, assume an installation path, or claim that Chrome or the extension can reveal the absolute OS source path. Update the API endpoint, request format, and minimum Chrome host permissions needed for that provider. Preserve the bring-your-own-key model and local Chrome storage. Keep all API keys out of source code, commits, logs, screenshots, and this chat; after the code is ready, tell me where I should enter the key myself. Keep DeepSeek-specific fields and retries provider-scoped, update README.md, README.zh-CN.md, PRIVACY.md, SECURITY.md, and the tests, then run npm test, npm run check, and npm run package. Finally, explain how to reload the unpacked extension and test it on a real YouTube video.`;
+  const customizationPrompt = `Customize this local YouTube Digest workspace to use [PROVIDER] with [MODEL]. Work only in the current workspace. Before editing, verify that it contains manifest.json and that the manifest name is YouTube Digest. If verification fails, stop and ask me to open the extracted YouTube Digest project folder in my coding agent. Do not search other folders, edit a guessed copy, assume an installation path, or claim Chrome can reveal the absolute OS source path. Update the provider's API endpoint, request format, and minimum Chrome host permissions. Preserve bring-your-own-key and local Chrome storage. Never put API keys in source code, commits, logs, screenshots, this prompt, or chat; after the code is ready, tell me where to enter the key myself. Keep DeepSeek-only request fields and retry behavior isolated to DeepSeek. Handle provider-specific rules separately so one provider does not affect another. Update README.md, README.zh-CN.md, PRIVACY.md, SECURITY.md, and tests. Run npm test, npm run check, and npm run package. Then explain how to reload the unpacked extension and test it on a real YouTube video.`;
   assert.ok(optionsPage.includes(`>${customizationPrompt}</textarea>`));
   assert.doesNotMatch(customizationPrompt, /Documents|USERPROFILE/);
 

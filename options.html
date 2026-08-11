@@ -9,9 +9,34 @@
   <body>
     <main class="settings-shell">
       <header>
-        <div class="eyebrow">YouTube Digest</div>
-        <h1>Bring your own API keys</h1>
-        <p class="lede">
+        <div class="settings-heading-row">
+          <div class="eyebrow">YouTube Digest</div>
+          <div
+            class="language-switch"
+            role="group"
+            aria-label="Interface language"
+            data-i18n-aria-label="languageGroupLabel"
+          >
+            <button
+              class="language-option"
+              type="button"
+              data-language="en"
+              aria-pressed="true"
+            >
+              English
+            </button>
+            <button
+              class="language-option"
+              type="button"
+              data-language="zh-CN"
+              aria-pressed="false"
+            >
+              中文
+            </button>
+          </div>
+        </div>
+        <h1 data-i18n="heading">Bring your own API keys</h1>
+        <p class="lede" data-i18n="lede">
           Keys stay in this Chrome profile and are sent only to Supadata and
           DeepSeek. This open-source extension has no developer server or
           analytics.
@@ -20,8 +45,10 @@
 
       <form id="settingsForm">
         <section class="card">
-          <h2>Transcript provider</h2>
-          <label for="supadataApiKey">Supadata API key</label>
+          <h2 data-i18n="transcriptProvider">Transcript provider</h2>
+          <label for="supadataApiKey" data-i18n="supadataApiKeyLabel"
+            >Supadata API key</label
+          >
           <input
             id="supadataApiKey"
             name="supadataApiKey"
@@ -31,24 +58,37 @@
             placeholder="Paste your Supadata key"
           />
           <p class="help">
-            Used to fetch timestamped YouTube subtitles.
+            <span data-i18n="supadataHelp"
+              >Used to fetch timestamped YouTube subtitles.</span
+            >
             <a
               href="https://dash.supadata.ai/auth/sign-up"
               target="_blank"
               rel="noreferrer"
+              data-i18n="supadataLink"
               >Create a Supadata account and key</a
-            >. Supadata generates the key during onboarding.
+            ><span data-i18n="supadataHelpSuffix"
+              >. Supadata generates the key during onboarding.</span
+            >
           </p>
         </section>
 
         <section class="card">
-          <h2>AI provider</h2>
-          <div class="provider-summary" aria-label="Supported AI provider">
+          <h2 data-i18n="aiProvider">AI provider</h2>
+          <div
+            class="provider-summary"
+            aria-label="Supported AI provider"
+            data-i18n-aria-label="providerSummaryLabel"
+          >
             <span class="provider-name">DeepSeek V4 Flash</span>
-            <span class="provider-badge">Supported in this version</span>
+            <span class="provider-badge" data-i18n="providerBadge"
+              >Supported in this version</span
+            >
           </div>
 
-          <label for="aiApiKey">DeepSeek API key</label>
+          <label for="aiApiKey" data-i18n="deepseekApiKeyLabel"
+            >DeepSeek API key</label
+          >
           <input
             id="aiApiKey"
             name="aiApiKey"
@@ -58,16 +98,19 @@
             placeholder="Paste your DeepSeek key"
           />
           <p class="help">
-            YouTube Digest uses DeepSeek V4 Flash for overviews,
-            explanations, translation, and note polishing.
+            <span data-i18n="deepseekHelp"
+              >YouTube Digest uses DeepSeek V4 Flash for overviews,
+              explanations, translation, and note polishing.</span
+            >
             <a
               href="https://platform.deepseek.com/api_keys"
               target="_blank"
               rel="noreferrer"
+              data-i18n="deepseekLink"
               >Create a DeepSeek API key</a
-            >.
+            ><span data-i18n="deepseekHelpSuffix">.</span>
           </p>
-          <div class="privacy-note">
+          <div class="privacy-note" data-i18n="privacyNote">
             When you use AI features, DeepSeek receives the video transcript
             and relevant video context. Review DeepSeek's terms and pricing
             before saving.
@@ -75,7 +118,9 @@
         </section>
 
         <div class="form-actions">
-          <button class="primary" type="submit">Save settings</button>
+          <button class="primary" type="submit" data-i18n="saveSettings">
+            Save settings
+          </button>
           <span id="saveStatus" role="status" aria-live="polite"></span>
         </div>
       </form>
@@ -83,36 +128,62 @@
       <details class="card customization-card">
         <summary class="customization-summary">
           <span class="customization-summary-copy">
-            <span class="eyebrow">Local remix</span>
-            <span class="customization-title"
+            <span class="eyebrow" data-i18n="localRemix">Local remix</span>
+            <span class="customization-title" data-i18n="customizationTitle"
               >Want to use another AI model?</span
             >
-            <span class="customization-purpose"
-              >Copy a safe prompt for your coding agent</span
+            <span
+              class="customization-purpose"
+              data-i18n="customizationPurpose"
+              >Edit and copy a safe prompt for your coding agent</span
             >
           </span>
-          <span class="agent-badge">Coding agent ready</span>
+          <span class="agent-badge" data-i18n="agentBadge"
+            >Coding agent ready</span
+          >
         </summary>
         <div class="customization-content">
-          <p class="help customization-copy">
-            This published version supports DeepSeek V4 Flash. You can adapt
-            your own local copy with a coding agent. Before copying, open the
-            exact YouTube Digest project folder that Chrome loaded through
-            Load unpacked in your coding agent. Then expand this section and
-            copy the prompt. For a first-time installation, optional permanent
-            locations include <code>~/Documents/youtube-digest</code> on macOS
-            or Linux, or
-            <code>%USERPROFILE%\Documents\youtube-digest</code> on Windows.
-            These are suggestions, not assumed paths. Chrome and the extension
-            cannot reliably reveal or copy the actual OS path. Never include
-            API keys in the prompt or chat. Enter them yourself only after the
-            code is ready.
+          <p class="help customization-intro" data-i18n="customizationIntro">
+            You can edit the prompt directly. Complete these three steps before
+            copying:
           </p>
-          <label for="customizationPrompt">Safe customization prompt</label>
-          <textarea id="customizationPrompt" readonly rows="12">Customize my local copy of YouTube Digest to use [PROVIDER] with [MODEL]. Work only in the currently open workspace. Before editing anything, verify that this workspace contains manifest.json and that its name is YouTube Digest. If verification fails, stop and tell me: "Open the exact YouTube Digest project folder that Chrome loaded through Load unpacked in your coding agent, then paste this prompt again." Do not search other folders or the whole disk, edit a guessed copy, assume an installation path, or claim that Chrome or the extension can reveal the absolute OS source path. Update the API endpoint, request format, and minimum Chrome host permissions needed for that provider. Preserve the bring-your-own-key model and local Chrome storage. Keep all API keys out of source code, commits, logs, screenshots, and this chat; after the code is ready, tell me where I should enter the key myself. Keep DeepSeek-specific fields and retries provider-scoped, update README.md, README.zh-CN.md, PRIVACY.md, SECURITY.md, and the tests, then run npm test, npm run check, and npm run package. Finally, explain how to reload the unpacked extension and test it on a real YouTube video.</textarea>
+          <ol class="customization-steps">
+            <li data-i18n="customizationStepFolder">
+              Open the extracted YouTube Digest project folder in your coding
+              agent.
+            </li>
+            <li data-i18n="customizationStepReplace">
+              Replace [PROVIDER] and [MODEL] with the service and model you want
+              to use.
+            </li>
+            <li data-i18n="customizationStepKeys">
+              Never include API keys in the prompt or chat. Enter them yourself
+              after the code is ready.
+            </li>
+          </ol>
+          <label for="customizationPrompt" data-i18n="customizationPromptLabel"
+            >Editable customization prompt</label
+          >
+          <div
+            id="customizationPromptReminder"
+            class="prompt-reminder"
+            role="note"
+            aria-label="Prompt reminder"
+            data-i18n-aria-label="customizationReminderLabel"
+          >
+            <span data-i18n="customizationReminder"
+              >Before copying, replace [PROVIDER] and [MODEL] with the provider
+              and model you want to use.</span
+            >
+          </div>
+          <textarea id="customizationPrompt" rows="12" aria-describedby="customizationPromptReminder">Customize this local YouTube Digest workspace to use [PROVIDER] with [MODEL]. Work only in the current workspace. Before editing, verify that it contains manifest.json and that the manifest name is YouTube Digest. If verification fails, stop and ask me to open the extracted YouTube Digest project folder in my coding agent. Do not search other folders, edit a guessed copy, assume an installation path, or claim Chrome can reveal the absolute OS source path. Update the provider's API endpoint, request format, and minimum Chrome host permissions. Preserve bring-your-own-key and local Chrome storage. Never put API keys in source code, commits, logs, screenshots, this prompt, or chat; after the code is ready, tell me where to enter the key myself. Keep DeepSeek-only request fields and retry behavior isolated to DeepSeek. Handle provider-specific rules separately so one provider does not affect another. Update README.md, README.zh-CN.md, PRIVACY.md, SECURITY.md, and tests. Run npm test, npm run check, and npm run package. Then explain how to reload the unpacked extension and test it on a real YouTube video.</textarea>
           <div class="copy-actions">
-            <button id="copyCustomizationPromptBtn" type="button">
-              Copy customization prompt
+            <button
+              id="copyCustomizationPromptBtn"
+              type="button"
+              data-i18n="copyCustomizationPrompt"
+            >
+              Copy edited prompt
             </button>
             <span id="copyStatus" role="status" aria-live="polite"></span>
           </div>
@@ -120,22 +191,31 @@
       </details>
 
       <section class="card data-card">
-        <h2>Local data</h2>
-        <p class="help">
+        <h2 data-i18n="localData">Local data</h2>
+        <p class="help" data-i18n="localDataHelp">
           Digests, translations, and notes are stored only in this Chrome
           profile. You can remove them at any time.
         </p>
         <div class="data-actions">
-          <button id="clearCacheBtn" type="button">Clear cached digests</button>
-          <button id="clearNotesBtn" type="button">Delete all notes</button>
-          <button id="resetBtn" class="danger" type="button">
+          <button id="clearCacheBtn" type="button" data-i18n="clearCache">
+            Clear cached digests
+          </button>
+          <button id="clearNotesBtn" type="button" data-i18n="deleteNotes">
+            Delete all notes
+          </button>
+          <button
+            id="resetBtn"
+            class="danger"
+            type="button"
+            data-i18n="resetData"
+          >
             Reset extension data
           </button>
         </div>
         <span id="dataStatus" role="status" aria-live="polite"></span>
       </section>
 
-      <footer>
+      <footer data-i18n-html="footer">
         Read <a href="PRIVACY.md" target="_blank">PRIVACY.md</a> in the
         repository for the complete data-flow description.
       </footer>

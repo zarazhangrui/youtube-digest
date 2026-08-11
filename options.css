@@ -32,6 +32,49 @@ header {
   margin-bottom: 28px;
 }
 
+.settings-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.language-switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.language-switch .language-option {
+  min-width: 62px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.language-switch .language-option:hover {
+  border-color: transparent;
+  color: var(--text);
+}
+
+.language-switch .language-option[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(46, 42, 36, 0.14);
+}
+
+.language-switch .language-option:focus-visible {
+  outline: 3px solid rgba(200, 103, 79, 0.28);
+  outline-offset: 1px;
+}
+
 .eyebrow {
   color: var(--accent);
   font-size: 12px;
@@ -224,10 +267,34 @@ a {
   border-top: 1px solid #ead8d0;
 }
 
-.customization-copy {
+.customization-intro {
   max-width: 650px;
-  margin: 0 0 6px;
+  margin: 0;
   font-size: 14px;
+}
+
+.customization-steps {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 18px;
+  padding-left: 22px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.customization-steps li {
+  padding-left: 4px;
+}
+
+.prompt-reminder {
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid #e7b9a8;
+  border-radius: 10px;
+  background: #fff2ec;
+  color: #60483f;
+  font-size: 13px;
+  font-weight: 750;
 }
 
 .copy-actions {
@@ -298,6 +365,15 @@ footer {
 
   .card {
     padding: 19px;
+  }
+
+  .settings-heading-row {
+    align-items: flex-start;
+  }
+
+  .language-switch .language-option {
+    min-width: 56px;
+    padding-inline: 8px;
   }
 
   .customization-card {

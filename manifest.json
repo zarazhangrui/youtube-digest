@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Digest",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "minimum_chrome_version": "116",
   "description": "Turn YouTube videos into learning resources with transcripts, bilingual translation, AI overviews, and notes.",
   "permissions": ["sidePanel", "storage", "tabs", "scripting"],
