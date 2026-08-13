@@ -332,3 +332,11 @@ test("DOM mutation reconciliation repairs a replaced toolbar", () => {
   assert.equal(newRow.children.length, 1);
   assert.equal(newGroup.children.length, 1);
 });
+
+test("note keyboard shortcut ignores browser and system modifier keys", () => {
+  assert.match(
+    contentScript,
+    /if \(e\.ctrlKey \|\| e\.metaKey \|\| e\.altKey\) return;/,
+    "Cmd/Ctrl/Alt+N must fall through to the browser instead of saving a note",
+  );
+});

@@ -230,21 +230,13 @@ async function readBoundedAiResponse(response, onActivity) {
 // ============================================================
 
 /**
- * When the user clicks the extension icon, open the side panel.
- * Chrome's Side Panel API lets us show a persistent panel alongside the page.
- */
-chrome.action.onClicked.addListener((tab) => {
-  // Re-enable + open without awaiting — preserves user gesture context
-  chrome.sidePanel.setOptions({
-    tabId: tab.id,
-    path: "sidepanel.html",
-    enabled: true,
-  });
-  chrome.sidePanel.open({ tabId: tab.id });
-});
-
-/**
- * Allow the side panel to open on any page, but it's designed for YouTube.
+ * Open the side panel when the user clicks the extension icon.
+ *
+ * `openPanelOnActionClick: true` makes Chrome open the panel directly on the
+ * action click; when this is enabled Chrome does NOT dispatch
+ * `chrome.action.onClicked`, so no separate listener is needed here. Panel
+ * enable/disable per tab is handled by updatePanelForTab(), and the Digest
+ * button on YouTube pages opens the panel via the openSidePanel message.
  */
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
@@ -395,6 +387,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Bilingual-caption toggle preference. Content scripts run in an untrusted
+  // storage context, so they read/write this via the service worker instead of
+  // touching chrome.storage directly.
+  if (message.action === "getCaptionsPref") {
+    chrome.storage.local
+      .get("ytd_captions_enabled")
+      .then((stored) => sendResponse({ enabled: !!stored.ytd_captions_enabled }))
+      .catch(() => sendResponse({ enabled: false }));
+    return true;
+  }
+
+  if (message.action === "setCaptionsPref") {
+    chrome.storage.local
+      .set({ ytd_captions_enabled: !!message.enabled })
+      .then(() => sendResponse({ success: true }))
+      .catch((error) => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
   if (message.action === "openOptions") {
     chrome.runtime.openOptionsPage();
     sendResponse({ success: true });
@@ -421,7 +432,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // Broadcast to side panel to start digest (in case it's already open)
           setTimeout(() => {
             chrome.runtime
-              .sendMessage({ action: "startDigestFromButton" })
+              .sendMessage({ action: "startDigestFromButton", tabId })
               .catch(() => {});
           }, 300);
         })
@@ -458,12 +469,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     debugLog("[YouTube Digest BG] Relay request:", message.payload?.action);
     (async () => {
       try {
+        const targetTabId = Number.isInteger(message.tabId)
+          ? message.tabId
+          : null;
+        let targetTab = null;
+
+        if (targetTabId !== null) {
+          try {
+            const candidate = await chrome.tabs.get(targetTabId);
+            if (candidate?.url?.includes("youtube.com")) targetTab = candidate;
+          } catch (e) {
+            debugLog("[YouTube Digest BG] Target tab unavailable:", e.message);
+          }
+        }
+
         // Query specifically for YouTube tabs to avoid side panel context issues
         // Try multiple query strategies to find the right tab
-        let tabs = await chrome.tabs.query({
-          active: true,
-          lastFocusedWindow: true,
-        });
+        let tabs = targetTab
+          ? [targetTab]
+          : await chrome.tabs.query({
+              active: true,
+              lastFocusedWindow: true,
+            });
         debugLog(
           "[YouTube Digest BG] Active tab in last focused window:",
           tabs.length,
@@ -779,7 +806,7 @@ async function pollTranscriptJob(jobId, supadataApiKey) {
               language: chunk.lang || data.lang || null,
             });
             transcriptTextPlain += cleanText + " ";
-            transcriptTextTimestamped += `[${timestamp}] ${chunk.text}\n`;
+            transcriptTextTimestamped += `[${timestamp}] ${cleanText}\n`;
           }
         }
       }
@@ -1053,9 +1080,18 @@ function validateAndFixTimestamps(analysis, maxSeconds) {
  */
 async function handleGetVideoInfo(tabId) {
   try {
-    const response = await chrome.tabs.sendMessage(tabId, {
+    let response = await chrome.tabs.sendMessage(tabId, {
       action: "getVideoInfo",
     });
+    const playerInfo = await getPlayerVideoDetails(tabId);
+    if (playerInfo) {
+      response = {
+        title: playerInfo.title || response?.title || "",
+        channelName: playerInfo.channelName || response?.channelName || "",
+        duration: playerInfo.duration || response?.duration || 0,
+        description: playerInfo.description || response?.description || "",
+      };
+    }
     return response;
   } catch (error) {
     return { title: "", channelName: "", description: "" };

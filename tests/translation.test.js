@@ -11,8 +11,11 @@ function loadSidepanelHelpers({
   sendMessage = () => Promise.resolve({}),
   setTimeoutImpl = () => 0,
   clearTimeoutImpl = () => {},
+  storedValues = {},
+  documentImpl = null,
 } = {}) {
   const listeners = { addListener() {} };
+  const storage = { ...storedValues };
   const sandbox = {
     console,
     URL,
@@ -25,7 +28,7 @@ function loadSidepanelHelpers({
     IntersectionObserver: class {},
     CSS: { escape: (value) => value },
     window: { getSelection: () => null, close() {} },
-    document: {
+    document: documentImpl || {
       addEventListener() {},
       querySelectorAll: () => [],
       querySelector: () => null,
@@ -47,6 +50,15 @@ function loadSidepanelHelpers({
       },
     },
     chrome: {
+      storage: {
+        local: {
+          get: async (key) => {
+            if (typeof key === "string") return { [key]: storage[key] };
+            return { ...storage };
+          },
+          set: async (items) => Object.assign(storage, items),
+        },
+      },
       runtime: { onMessage: listeners, sendMessage },
       windows: { getCurrent: () => Promise.resolve({ id: 1 }) },
       tabs: { onUpdated: listeners, onActivated: listeners },
@@ -55,7 +67,7 @@ function loadSidepanelHelpers({
   };
   sandbox.globalThis = sandbox;
   vm.runInNewContext(read("sidepanel.js"), sandbox);
-  return sandbox.__YTD_TRANSCRIPT_TESTING__;
+  return { ...sandbox.__YTD_TRANSCRIPT_TESTING__, storage };
 }
 
 function loadBackgroundHelpers({
@@ -177,6 +189,272 @@ test("Transcript header exposes and wires Original, Chinese, and bilingual modes
   assert.match(js, /Original \(\$\{language\}\)/);
 });
 
+test("transcript display mode is restored as a persistent preference", () => {
+  const {
+    normalizeTranscriptMode,
+    TRANSCRIPT_MODE_STORAGE_KEY,
+    persistTranscriptMode,
+    restoreTranscriptMode,
+    storage,
+  } =
+    loadSidepanelHelpers();
+  const js = read("sidepanel.js");
+
+  assert.equal(TRANSCRIPT_MODE_STORAGE_KEY, "ytd_transcript_mode");
+  assert.equal(normalizeTranscriptMode("bilingual"), "bilingual");
+  assert.equal(normalizeTranscriptMode("zh"), "zh");
+  assert.equal(normalizeTranscriptMode("unsupported"), "original");
+  return persistTranscriptMode("bilingual").then(async () => {
+    assert.equal(storage.ytd_transcript_mode, "bilingual");
+    assert.equal(await restoreTranscriptMode(), "bilingual");
+  });
+});
+
+test("transcript mode loads before the panel starts loading a video", () => {
+  const js = read("sidepanel.js");
+  assert.match(
+    js,
+    /await restoreTranscriptMode\(\);[\s\S]*?await evictOldCacheEntries/,
+    "the preference must load before the panel starts loading a video",
+  );
+  assert.match(
+    js,
+    /currentTranscriptMode = mode;[\s\S]*?await persistTranscriptMode\(mode\);/,
+    "a mode change must be saved before later navigation can recreate the panel",
+  );
+});
+
+test("transcript scroll state is restored per video and display mode", async () => {
+  let contentScrollTop = 0;
+  const followButton = { style: { display: "none" } };
+  const timers = createFakeTimers();
+  const sidepanel = loadSidepanelHelpers({
+    storedValues: {
+      ytd_transcript_mode: "bilingual",
+      ytd_transcript_view_state: {
+        "abc123:bilingual": {
+          scrollTop: 480,
+          autoScrollEnabled: false,
+          updatedAt: 1,
+        },
+      },
+    },
+    setTimeoutImpl: timers.setTimeout,
+    clearTimeoutImpl: timers.clearTimeout,
+    documentImpl: {
+      addEventListener() {},
+      querySelectorAll: () => [],
+      querySelector: () => null,
+      getElementById: (id) => {
+        if (id === "contentArea") {
+          return {
+            get scrollTop() {
+              return contentScrollTop;
+            },
+            set scrollTop(value) {
+              contentScrollTop = value;
+            },
+          };
+        }
+        if (id === "followPlaybackBtn") return followButton;
+        return null;
+      },
+      createElement: () => ({ textContent: "", innerHTML: "" }),
+    },
+  });
+
+  await sidepanel.restoreTranscriptMode();
+  sidepanel.__setCurrentVideoForTesting("abc123");
+  await sidepanel.restoreTranscriptViewStateAfterRender();
+
+  assert.equal(contentScrollTop, 480);
+  assert.equal(followButton.style.display, "block");
+  assert.equal(sidepanel.getTranscriptScrollGuardState().programmatic, true);
+  timers.fireActive(50);
+  assert.equal(sidepanel.getTranscriptScrollGuardState().programmatic, false);
+});
+
+test("saved scroll position does not override active Follow playback", async () => {
+  let contentScrollTop = 0;
+  const followButton = { style: { display: "none" } };
+  const sidepanel = loadSidepanelHelpers({
+    storedValues: {
+      ytd_transcript_mode: "bilingual",
+      ytd_transcript_view_state: {
+        "abc123:bilingual": {
+          scrollTop: 480,
+          autoScrollEnabled: true,
+          updatedAt: 1,
+        },
+      },
+    },
+    documentImpl: {
+      addEventListener() {},
+      querySelectorAll: () => [],
+      querySelector: () => null,
+      getElementById: (id) => {
+        if (id === "contentArea") {
+          return {
+            get scrollTop() {
+              return contentScrollTop;
+            },
+            set scrollTop(value) {
+              contentScrollTop = value;
+            },
+          };
+        }
+        if (id === "followPlaybackBtn") return followButton;
+        return null;
+      },
+      createElement: () => ({ textContent: "", innerHTML: "" }),
+    },
+  });
+
+  await sidepanel.restoreTranscriptMode();
+  sidepanel.__setCurrentVideoForTesting("abc123");
+  await sidepanel.restoreTranscriptViewStateAfterRender();
+
+  assert.equal(contentScrollTop, 0);
+  assert.equal(followButton.style.display, "none");
+  assert.equal(sidepanel.getTranscriptScrollGuardState().programmatic, false);
+});
+
+test("same-video tab activation does not rebuild transcript from cache", () => {
+  const js = read("sidepanel.js");
+
+  assert.match(
+    js,
+    /if \(videoId === currentVideoId && currentTranscript\) \{[\s\S]*?return;[\s\S]*?\}/,
+    "returning to an already-loaded video should keep the current transcript DOM",
+  );
+  assert.match(
+    js,
+    /startPlaybackTracking\(\{ preserveFollowState: true \}\)/,
+    "same-video activation must preserve the user's Follow playback choice",
+  );
+  assert.match(
+    js,
+    /function handleFrontTab\(tab\)[\s\S]*?youtubeTabId = tab\.id;[\s\S]*?playbackTrackingTick\(true\);/,
+    "same-video tab switches must re-bind and re-sync Follow playback without rebuilding",
+  );
+});
+
+test("saved video title and author fill in when page metadata is unavailable", () => {
+  const { chooseVideoMetadata } = loadSidepanelHelpers();
+
+  assert.equal(
+    chooseVideoMetadata("", "Cached video title"),
+    "Cached video title",
+  );
+  assert.equal(
+    chooseVideoMetadata(null, "Cached channel"),
+    "Cached channel",
+  );
+  assert.equal(
+    chooseVideoMetadata("Live video title", "Older cached title"),
+    "Live video title",
+  );
+});
+
+test("playback tracking keeps a relay fallback when a direct tab is unavailable", async () => {
+  const { getPlaybackState } = loadSidepanelHelpers({
+    sendMessage: () =>
+      Promise.resolve({ success: true, response: { currentTime: 42 } }),
+  });
+  const js = read("sidepanel.js");
+
+  assert.deepEqual(await getPlaybackState(), { currentTime: 42 });
+  assert.match(
+    js,
+    /chrome\.runtime\.sendMessage\(\{[\s\S]*?action: "relayToContent",[\s\S]*?tabId: youtubeTabId,[\s\S]*?payload,/,
+    "the relay fallback must keep targeting the selected YouTube tab",
+  );
+  assert.match(
+    read("background.js"),
+    /const targetTabId = Number\.isInteger\(message\.tabId\)[\s\S]*?chrome\.tabs\.get\(targetTabId\)[\s\S]*?tabs = targetTab\s*\? \[targetTab\]/,
+    "the selected YouTube tab must be preferred over a newly queried tab",
+  );
+});
+
+test("transcript entry lookup keeps fractional timestamps precise", () => {
+  const { findTranscriptEntryForTime } = loadSidepanelHelpers();
+  const entries = [
+    { dataset: { seconds: "10.25" } },
+    { dataset: { seconds: "12.75" } },
+    { dataset: { seconds: "15.5" } },
+  ];
+
+  assert.equal(findTranscriptEntryForTime(entries, 12.6), entries[0]);
+  assert.equal(findTranscriptEntryForTime(entries, 12.75), entries[1]);
+  assert.equal(findTranscriptEntryForTime(entries, 15.7), entries[2]);
+});
+
+test("Follow playback refreshes the current player position before scrolling", () => {
+  const js = read("sidepanel.js");
+
+  assert.match(
+    js,
+    /const didScroll = await playbackTrackingTick\(true\);[\s\S]*?if \(!didScroll\) scrollToActiveEntry\(\);/,
+    "the button must fall back to the existing highlight instead of looking dead",
+  );
+  assert.match(
+    js,
+    /async function playbackTrackingTick\(forceScroll = false\)[\s\S]*?return highlightActiveEntry\(currentTime, forceScroll\);/,
+  );
+  assert.match(
+    js,
+    /if \(forceScroll && autoScrollEnabled\) \{[\s\S]*?scrollTranscriptEntryIntoView\(activeEntry\);[\s\S]*?return true;/,
+  );
+  assert.match(
+    js,
+    /contentArea\.addEventListener\("scrollend", onContentAreaScrollEnd\)/,
+    "programmatic smooth scrolling must remain marked until it actually ends",
+  );
+  assert.match(
+    js,
+    /function onContentAreaScroll\(\) \{\s*if \(programmaticTranscriptScroll\) return;/,
+    "the extension's own scrolling must not turn Follow playback off",
+  );
+  assert.match(
+    js,
+    /function onManualTranscriptNavigation\(\)[\s\S]*?finishProgrammaticTranscriptScroll\(\);[\s\S]*?disableAutoScrollForManualNavigation\(\);/,
+    "real wheel and touch input must still pause following immediately",
+  );
+  assert.doesNotMatch(
+    js,
+    /lastAutoScrollTime/,
+    "a fixed time window cannot reliably classify a long smooth scroll",
+  );
+  assert.match(
+    js,
+    /autoScrollInterval = setInterval\(\(\) => playbackTrackingTick\(\), 500\);[\s\S]*?playbackTrackingTick\(true\);/,
+    "initial follow must force a jump to the current playback position",
+  );
+});
+
+test("programmatic transcript scrolling cannot be mistaken for manual scrolling", () => {
+  const {
+    beginProgrammaticTranscriptScroll,
+    finishProgrammaticTranscriptScroll,
+    getTranscriptScrollGuardState,
+    onManualTranscriptNavigation,
+  } = loadSidepanelHelpers();
+
+  beginProgrammaticTranscriptScroll();
+  assert.equal(getTranscriptScrollGuardState().programmatic, true);
+
+  finishProgrammaticTranscriptScroll();
+  assert.equal(getTranscriptScrollGuardState().programmatic, false);
+
+  beginProgrammaticTranscriptScroll();
+  onManualTranscriptNavigation();
+  assert.equal(
+    getTranscriptScrollGuardState().programmatic,
+    false,
+    "real user input must interrupt a smooth programmatic scroll",
+  );
+});
+
 test("semantic segmentation rebuilds sentences across caption boundaries", () => {
   const { groupTranscriptEntries } = loadSidepanelHelpers();
   const segments = groupTranscriptEntries(
@@ -255,6 +533,26 @@ test("structured translation batches align by stable ID and expose missing fallb
   assert.equal(aligned[0].text, "");
   assert.match(aligned[0].error, /unavailable/i);
   assert.equal(aligned[1].text, "\u7b2c\u4e8c\u4e2a\u5b8c\u6574\u53e5\u5b50\u3002");
+});
+
+test("transcript translation queues every missing row after the first viewport", () => {
+  const js = read("sidepanel.js");
+
+  assert.match(
+    js,
+    /const indices = queue\.splice\(0, 4\);/,
+    "batch size should use the full provider-supported transcript window",
+  );
+  assert.match(
+    js,
+    /if \(index < 4\) enqueue\(index\);/,
+    "the first visible rows should still translate immediately",
+  );
+  assert.match(
+    js,
+    /setTimeout\(\(\) => \{[\s\S]*?rows\.forEach\(\(row, index\) => \{[\s\S]*?!row\.classList\.contains\("translated"\)[\s\S]*?enqueue\(index\);/,
+    "remaining untranslated rows must be queued even if the user never scrolls to them",
+  );
 });
 
 test("translated-only omits English while bilingual renders aligned English and Chinese", () => {
@@ -593,4 +891,21 @@ test("Chinese prompt preserves natural bilingual-learning style rules", () => {
   assert.match(prompt, /Use 你, never 您/);
   assert.match(prompt, /spaces between Chinese and adjacent English words or digits/);
   assert.match(prompt, /source-language `text`/);
+});
+
+test("both transcript paths feed speaker-marker-cleaned text to the AI provider", () => {
+  const source = read("background.js");
+  const cleaned = (source.match(/\$\{cleanText\}\\n`/g) || []).length;
+  assert.equal(
+    cleaned,
+    2,
+    "the synchronous and async polling paths must both use cleaned text",
+  );
+  assert.doesNotMatch(source, /\$\{chunk\.text\}\\n/);
+});
+
+test("background service worker has no dead action.onClicked listener", () => {
+  const source = read("background.js");
+  assert.doesNotMatch(source, /chrome\.action\.onClicked\.addListener/);
+  assert.match(source, /openPanelOnActionClick: true/);
 });
