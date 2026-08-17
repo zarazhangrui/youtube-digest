@@ -54,6 +54,19 @@ var YTD_SETTINGS = (() => {
     return `https://www.youtube.com/watch?v=${normalized}`;
   }
 
+  // Human-facing timestamps use H:MM:SS once a video crosses one hour;
+  // model-facing [M:SS] transcript markers stay compact on purpose.
+  function formatTimestamp(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    if (hours > 0) {
+      return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+    }
+    return `${minutes}:${String(secs).padStart(2, "0")}`;
+  }
+
   return {
     STORAGE_KEY,
     DEFAULTS,
@@ -62,6 +75,7 @@ var YTD_SETTINGS = (() => {
     migrateLegacyCustom,
     chatCompletionsUrl,
     canonicalYouTubeUrl,
+    formatTimestamp,
   };
 })();
 

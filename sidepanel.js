@@ -850,9 +850,7 @@ function renderTranscript() {
     div.className = "transcript-entry";
     div.dataset.seconds = group.start;
 
-    const minutes = Math.floor(group.start / 60);
-    const seconds = Math.floor(group.start % 60);
-    const timestamp = `${minutes}:${String(seconds).padStart(2, "0")}`;
+    const timestamp = YTD_SETTINGS.formatTimestamp(group.start);
 
     div.innerHTML = `
       <span class="transcript-time">${timestamp}</span>
@@ -1638,17 +1636,39 @@ function stopPlaybackTracking() {
 /**
  * One tick of the playback tracker. Gets current video time from the
  * YouTube tab and highlights + scrolls to the matching transcript entry.
+ * Tries the stored tab ID directly first; only falls back to the background
+ * relay when that tab is gone — the relay runs a multi-step tab search that
+ * is far too heavy to repeat twice a second.
  */
 async function playbackTrackingTick() {
   try {
-    const result = await chrome.runtime.sendMessage({
-      action: "relayToContent",
-      payload: { action: "getCurrentTime" },
-    });
+    let payload = null;
 
-    if (!result.success || !result.response) return;
+    if (youtubeTabId) {
+      try {
+        payload = await chrome.tabs.sendMessage(youtubeTabId, {
+          action: "getCurrentTime",
+        });
+      } catch (directErr) {
+        debugLog(
+          "[YouTube Digest Panel] Direct getCurrentTime failed, falling back to relay:",
+          directErr.message,
+        );
+      }
+    }
 
-    const currentTime = result.response.currentTime || 0;
+    if (!payload) {
+      const result = await chrome.runtime.sendMessage({
+        action: "relayToContent",
+        payload: { action: "getCurrentTime" },
+      });
+      if (!result?.success) return;
+      payload = result.response;
+    }
+
+    if (!payload) return;
+
+    const currentTime = payload.currentTime || 0;
     highlightActiveEntry(currentTime);
   } catch (error) {
     // Silently ignore — YouTube tab might be closed or navigated away
@@ -1827,9 +1847,7 @@ function renderTranscriptModeRows(segments, mode) {
     div.dataset.segmentId = segment.id;
     div.dataset.segmentIndex = index;
 
-    const minutes = Math.floor(segment.start / 60);
-    const seconds = Math.floor(segment.start % 60);
-    const timestamp = `${minutes}:${String(seconds).padStart(2, "0")}`;
+    const timestamp = YTD_SETTINGS.formatTimestamp(segment.start);
     div.innerHTML = `
       <span class="transcript-time">${timestamp}</span>
       ${renderTranscriptSegmentContent(segment, mode, cached, "")}

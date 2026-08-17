@@ -892,18 +892,14 @@ async function handleAnalyzeTranscript(
       Math.floor(videoDuration || 0),
       lastTranscriptSeconds,
     );
-    const durationMinutes = Math.floor(effectiveSeconds / 60);
-    const durationSeconds = Math.floor(effectiveSeconds % 60);
-    const durationFormatted = `${durationMinutes}:${String(durationSeconds).padStart(2, "0")}`;
+    const durationFormatted = YTD_SETTINGS.formatTimestamp(effectiveSeconds);
     const maxTimestampSeconds = effectiveSeconds;
 
     // The "last chapter must be after" threshold (75% in) forces the model to
     // cover the WHOLE video instead of front-loading chapters near the start.
     // We do NOT prescribe a chapter count — the model picks the natural splits.
     const lateThresholdSeconds = Math.floor(effectiveSeconds * 0.75);
-    const lateThreshold = `${Math.floor(lateThresholdSeconds / 60)}:${String(
-      lateThresholdSeconds % 60,
-    ).padStart(2, "0")}`;
+    const lateThreshold = YTD_SETTINGS.formatTimestamp(lateThresholdSeconds);
 
     const promptVariables = {
       durationFormatted,
@@ -983,12 +979,7 @@ function validateAndFixTimestamps(analysis, maxSeconds) {
       ? Number(maxSeconds)
       : Number.MAX_SAFE_INTEGER;
 
-  // Helper to format seconds as MM:SS
-  const formatTimestamp = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${String(secs).padStart(2, "0")}`;
-  };
+  const formatTimestamp = (seconds) => YTD_SETTINGS.formatTimestamp(seconds);
 
   const safeString = (value, maxLength) =>
     typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -1192,10 +1183,8 @@ async function handleSaveNote(
       videoTitle,
     );
 
-    // Format timestamp as MM:SS
-    const minutes = Math.floor(safeTimestamp / 60);
-    const seconds = safeTimestamp % 60;
-    const formattedTimestamp = `${minutes}:${String(seconds).padStart(2, "0")}`;
+    // Format timestamp for display
+    const formattedTimestamp = YTD_SETTINGS.formatTimestamp(safeTimestamp);
 
     // Create timestamped URL
     const timestampedUrl = `${canonicalVideoUrl}&t=${safeTimestamp}s`;

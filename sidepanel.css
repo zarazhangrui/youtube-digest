@@ -472,7 +472,7 @@ body {
   font-size: 11.5px;
   font-weight: 500;
   color: var(--accent);
-  min-width: 46px;
+  min-width: 52px;
   padding: 3px 8px;
   background: var(--accent-dim);
   border-radius: var(--r-sm);
@@ -637,7 +637,7 @@ body {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--accent);
-  min-width: 46px;
+  min-width: 52px;
   padding-top: 2px;
   flex-shrink: 0;
 }
