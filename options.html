@@ -73,48 +73,84 @@
           </p>
         </section>
 
-        <section class="card">
-          <h2 data-i18n="aiProvider">AI provider</h2>
-          <div
-            class="provider-summary"
-            aria-label="Supported AI provider"
-            data-i18n-aria-label="providerSummaryLabel"
-          >
-            <span class="provider-name">DeepSeek V4 Flash</span>
-            <span class="provider-badge" data-i18n="providerBadge"
-              >Supported in this version</span
-            >
+        <section class="card language-preferences-card">
+          <h2 data-i18n="learningLanguagesTitle">Learning languages</h2>
+          <p class="help" data-i18n="learningLanguagesHelp">Choose one or more languages you may use for translation. The default language is used when a new video is opened, but you can switch targets at any time.</p>
+          <div id="targetLanguageOptions" class="target-language-options" aria-label="Preferred target languages"></div>
+          <label for="defaultTargetLanguage" data-i18n="defaultTargetLanguageLabel">Default target language</label>
+          <select id="defaultTargetLanguage" class="settings-select" aria-describedby="defaultTargetLanguageHelp"></select>
+          <p id="defaultTargetLanguageHelp" class="help" data-i18n="defaultTargetLanguageHelp">This is only the initial target for a new video. It does not limit your other preferred languages.</p>
+        </section>
+
+        <section class="card ai-providers-card">
+          <h2 data-i18n="aiProvider">AI providers & models</h2>
+          <p class="help" data-i18n="aiProviderHelp">Connect one or more providers. The default model initializes new videos; each task can use its own model.</p>
+
+          <div class="provider-card">
+            <div class="provider-card-header">
+              <div><strong data-i18n="deepseekProvider">DeepSeek</strong><span class="provider-badge">V4</span></div>
+              <label class="toggle-label"><input id="deepseekEnabled" type="checkbox" checked /><span data-i18n="providerEnabled">Enabled</span></label>
+            </div>
+            <label for="aiApiKey" data-i18n="apiKeyLabel">API key</label>
+            <input id="aiApiKey" name="aiApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your DeepSeek key" />
+            <label for="deepseekModel" data-i18n="modelLabel">Model</label>
+            <select id="deepseekModel" class="settings-select" disabled><option>DeepSeek V4 Flash / V4 Pro</option></select>
+            <p class="help"><a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer" data-i18n="deepseekLink">Create a DeepSeek API key</a></p>
+            <div class="connection-test-row"><button type="button" data-test-model="deepseek-v4-flash" data-i18n="testConnection">Test connection</button><span class="connection-status" role="status" aria-live="polite"></span></div>
           </div>
 
-          <label for="aiApiKey" data-i18n="deepseekApiKeyLabel"
-            >DeepSeek API key</label
-          >
-          <input
-            id="aiApiKey"
-            name="aiApiKey"
-            type="password"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder="Paste your DeepSeek key"
-          />
-          <p class="help">
-            <span data-i18n="deepseekHelp"
-              >YouTube Digest uses DeepSeek V4 Flash for overviews,
-              explanations, translation, and note polishing.</span
-            >
-            <a
-              href="https://platform.deepseek.com/api_keys"
-              target="_blank"
-              rel="noreferrer"
-              data-i18n="deepseekLink"
-              >Create a DeepSeek API key</a
-            ><span data-i18n="deepseekHelpSuffix">.</span>
-          </p>
-          <div class="privacy-note" data-i18n="privacyNote">
-            When you use AI features, DeepSeek receives the video transcript
-            and relevant video context. Review DeepSeek's terms and pricing
-            before saving.
+          <div class="provider-card">
+            <div class="provider-card-header">
+              <div><strong data-i18n="geminiProvider">Google Gemini</strong></div>
+              <label class="toggle-label"><input id="geminiEnabled" type="checkbox" /><span data-i18n="providerEnabled">Enabled</span></label>
+            </div>
+            <label for="geminiApiKey" data-i18n="apiKeyLabel">API key</label>
+            <input id="geminiApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Gemini API key" />
+            <p class="help"><a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">Google AI Studio</a></p>
+            <div class="connection-test-row"><button type="button" data-test-model="gemini-3.6-flash" data-i18n="testConnection">Test connection</button><span class="connection-status" role="status" aria-live="polite"></span></div>
           </div>
+
+          <div class="provider-card">
+            <div class="provider-card-header">
+              <div><strong data-i18n="openaiProvider">OpenAI</strong></div>
+              <label class="toggle-label"><input id="openaiEnabled" type="checkbox" /><span data-i18n="providerEnabled">Enabled</span></label>
+            </div>
+            <label for="openaiApiKey" data-i18n="apiKeyLabel">API key</label>
+            <input id="openaiApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your OpenAI API key" />
+            <p class="help"><a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">OpenAI API keys</a></p>
+            <div class="connection-test-row"><button type="button" data-test-model="gpt-5.6-luna" data-i18n="testConnection">Test connection</button><span class="connection-status" role="status" aria-live="polite"></span></div>
+          </div>
+
+          <div class="provider-card">
+            <div class="provider-card-header">
+              <div><strong data-i18n="customProvider">Custom OpenAI-compatible</strong></div>
+              <label class="toggle-label"><input id="customEnabled" type="checkbox" /><span data-i18n="providerEnabled">Enabled</span></label>
+            </div>
+            <label for="customApiKey" data-i18n="apiKeyLabel">API key</label>
+            <input id="customApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="API key" />
+            <label for="customBaseUrl" data-i18n="baseUrlLabel">Base URL</label>
+            <input id="customBaseUrl" type="url" placeholder="https://example.com/v1" />
+            <label for="customModel" data-i18n="customModelLabel">Custom model ID</label>
+            <input id="customModel" type="text" placeholder="model-name" />
+            <p class="help" data-i18n="customPermissionHelp">Custom endpoints require Chrome host permission for that API origin. Chrome will ask before granting it.</p>
+            <div class="connection-test-row"><button type="button" data-test-model="custom" data-i18n="testConnection">Test connection</button><span class="connection-status" role="status" aria-live="polite"></span></div>
+          </div>
+
+          <div class="ai-defaults">
+            <h3>Model defaults</h3>
+            <label for="defaultAiModel" data-i18n="defaultAiModelLabel">Default AI model</label>
+            <select id="defaultAiModel" class="settings-select"></select>
+            <label for="translationModel" data-i18n="translationModelLabel">Translation</label>
+            <select id="translationModel" class="settings-select"></select>
+            <label for="explanationModel" data-i18n="explanationModelLabel">Explanation</label>
+            <select id="explanationModel" class="settings-select"></select>
+            <label for="analysisModel" data-i18n="analysisModelLabel">Overview / analysis</label>
+            <select id="analysisModel" class="settings-select"></select>
+            <label for="noteModel" data-i18n="noteModelLabel">Note polishing</label>
+            <select id="noteModel" class="settings-select"></select>
+          </div>
+
+          <div class="privacy-note" data-i18n="privacyNote">When you use AI features, the selected provider receives the video transcript and relevant video context. Review that provider's terms and pricing before saving.</div>
         </section>
 
         <div class="form-actions">

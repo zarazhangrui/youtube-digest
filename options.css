@@ -159,6 +159,40 @@ a {
   color: var(--accent-hover);
 }
 
+.target-language-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.target-language-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.target-language-option input {
+  width: auto;
+  margin: 0;
+}
+
+.settings-select {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+}
+
 .privacy-note {
   margin-top: 18px;
   padding: 12px 14px;
@@ -398,5 +432,107 @@ footer {
 
   .customization-content {
     padding: 17px;
+  }
+}
+
+.provider-card {
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fcfaf7;
+}
+
+.provider-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.provider-card-header > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.toggle-label input {
+  width: auto;
+}
+
+.provider-card button {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.provider-card button:hover {
+  border-color: var(--accent);
+}
+
+.provider-card button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.connection-test-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.provider-card .connection-test-row button {
+  margin-top: 0;
+}
+
+.connection-status {
+  min-height: 18px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.connection-status.success {
+  color: #247a45;
+}
+
+.connection-status.error {
+  color: #b43b2f;
+}
+
+.connection-status.testing {
+  color: var(--muted);
+}
+
+.ai-defaults {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.ai-defaults h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+@media (max-width: 600px) {
+  .provider-card-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

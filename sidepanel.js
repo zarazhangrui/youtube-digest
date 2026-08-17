@@ -21,17 +21,25 @@ let currentTranscript = null;
 let currentTranscriptText = null; // Plain text (for display/export)
 let currentTranscriptTimestamped = null; // With timestamps for AI analysis
 let currentTranscriptLanguage = null;
+let currentResolvedSourceLanguage = null;
+let currentAvailableSourceLanguages = [];
+let currentSourceLanguage = "auto";
+let currentPreferredTargetLanguages = ["zh-CN"];
+let currentDefaultTargetLanguage = "zh-CN";
+let currentTargetLanguage = "zh-CN";
 let currentVideoTitle = "";
 let currentChannelName = "";
 let currentVideoDescription = "";
 let currentVideoDuration = 0;
+let currentVideoMetadata = null;
 let isAnalysisLoading = false; // Track if analysis is in progress
 let youtubeTabId = null; // Store the YouTube tab ID for reliable messaging
 let errorAction = null;
 
 // --- Translation state ---
-// The public transcript control intentionally supports only the original
-// subtitles, Chinese, and an aligned source + Chinese view.
+// Translation is source/target agnostic. The current target is selected from
+// the user's preferred target-language list, while Original/Bilingual are
+// display modes rather than language choices.
 let currentTranscriptMode = "original";
 let translationGeneration = 0; // Invalidates responses from older UI modes/videos.
 let translationWorkCount = 0;
@@ -233,6 +241,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupEventListeners();
   await evictOldCacheEntries(20);
 
+  // Restore the user's persisted source-language preference before the first
+  // video load. Without this, every new side-panel instance resets to Auto.
+  try {
+    const stored = await chrome.storage.local.get("ytd_settings");
+    const savedSettings = YTD_SETTINGS.normalize(stored?.ytd_settings || {});
+    currentSourceLanguage = normalizeSourceLanguageSelection(savedSettings.sourceLanguage || "auto");
+    currentPreferredTargetLanguages = savedSettings.preferredTargetLanguages || ["zh-CN"];
+    currentDefaultTargetLanguage = savedSettings.defaultTargetLanguage || currentPreferredTargetLanguages[0] || "zh-CN";
+    currentTargetLanguage = currentDefaultTargetLanguage;
+    refreshTargetLanguageSelection();
+  } catch (_error) {
+    currentSourceLanguage = "auto";
+  }
+
   const configStatus = await chrome.runtime.sendMessage({
     action: "checkConfig",
   });
@@ -378,6 +400,12 @@ function setupEventListeners() {
   document
     .getElementById("exportTranscriptBtn")
     ?.addEventListener("click", exportTranscript);
+  document.getElementById("sourceLanguageSelect")?.addEventListener("change", () => {
+    onSourceLanguageChange();
+  });
+  document.getElementById("targetLanguageSelect")?.addEventListener("change", () => {
+    onTargetLanguageChange();
+  });
   document.querySelectorAll(".transcript-mode-btn").forEach((button) => {
     button.addEventListener("click", () => {
       handleTranscriptModeChange(button.dataset.transcriptMode);
@@ -417,6 +445,174 @@ function setNotesFilter(showAll) {
   thisVideoButton?.setAttribute("aria-pressed", String(!showAll));
   allNotesButton?.classList.toggle("active", showAll);
   allNotesButton?.setAttribute("aria-pressed", String(showAll));
+}
+
+function normalizeSourceLanguageSelection(value) {
+  const candidate = String(value ?? "").trim();
+  if (!candidate || candidate === "auto") return "auto";
+  return candidate.replace(/_/g, "-");
+}
+
+function formatLanguageLabel(code) {
+  const value = String(code ?? "").trim();
+  if (!value) return "Auto-detect";
+  const normalized = normalizeSourceLanguageSelection(value).toLowerCase();
+  const directLabels = {
+    en: "English",
+    "en-us": "English (US)",
+    "en-gb": "English (UK)",
+    es: "Español",
+    fr: "Français",
+    de: "Deutsch",
+    it: "Italiano",
+    ja: "日本語",
+    ko: "한국어",
+    pt: "Português",
+    ru: "Русский",
+    zh: "中文",
+    "zh-cn": "中文 (简体)",
+    "zh-tw": "中文 (繁體)",
+  };
+  if (directLabels[normalized]) return directLabels[normalized];
+  try {
+    const displayNames = new Intl.DisplayNames([document?.documentElement?.lang || "en"], {
+      type: "language",
+    });
+    const localized = displayNames.of(value);
+    if (localized) return localized;
+  } catch (_error) {
+    // Fallback to the raw code when the runtime cannot render a display name.
+  }
+  return value;
+}
+
+function normalizeTargetLanguageSelection(value) {
+  return YTD_SETTINGS.normalizeTargetLanguage(value) || "";
+}
+
+function getTargetLanguageName(code) {
+  const value = normalizeTargetLanguageSelection(code);
+  if (!value) return "";
+  try {
+    const displayNames = new Intl.DisplayNames([document?.documentElement?.lang || "en"], { type: "language" });
+    return displayNames.of(value) || value;
+  } catch (_error) {
+    return formatLanguageLabel(value);
+  }
+}
+
+function refreshTargetLanguageSelection() {
+  const select = document.getElementById("targetLanguageSelect");
+  if (!select) return;
+  const choices = currentPreferredTargetLanguages.length
+    ? currentPreferredTargetLanguages.map(normalizeTargetLanguageSelection).filter(Boolean)
+    : [currentDefaultTargetLanguage || "zh-CN"];
+  const uniqueChoices = [...new Set(choices)];
+  if (!uniqueChoices.length) uniqueChoices.push("zh-CN");
+  if (!uniqueChoices.includes(currentTargetLanguage)) {
+    currentTargetLanguage = uniqueChoices.includes(currentDefaultTargetLanguage)
+      ? currentDefaultTargetLanguage
+      : uniqueChoices[0];
+  }
+  select.innerHTML = uniqueChoices
+    .map((language) => `<option value="${escapeHtml(language)}">${escapeHtml(getTargetLanguageName(language))}</option>`)
+    .join("");
+  select.value = currentTargetLanguage;
+}
+
+async function onTargetLanguageChange() {
+  const select = document.getElementById("targetLanguageSelect");
+  if (!select) return;
+  const nextLanguage = normalizeTargetLanguageSelection(select.value);
+  if (!nextLanguage || nextLanguage === currentTargetLanguage) return;
+  currentTargetLanguage = nextLanguage;
+  translationGeneration += 1;
+  translationWorkCount = 0;
+  if (transcriptScrollObserver) transcriptScrollObserver.disconnect();
+  transcriptScrollObserver = null;
+  if (currentTranscriptMode !== "original") {
+    await translateTranscript();
+  } else {
+    renderTranscript();
+  }
+}
+
+function getTranscriptCacheKey(videoId, sourceLanguage = "auto") {
+  const normalized = normalizeSourceLanguageSelection(sourceLanguage);
+  return normalized === "auto"
+    ? `digest_${videoId}`
+    : `digest_${videoId}_${normalized}`;
+}
+
+function setSourceLanguageOptions(availableLanguages = []) {
+  const select = document.getElementById("sourceLanguageSelect");
+  if (!select) return;
+
+  const choices = Array.from(new Set(["auto", ...availableLanguages.map((entry) => normalizeSourceLanguageSelection(entry))]));
+  const selectedValue = normalizeSourceLanguageSelection(currentSourceLanguage);
+
+  select.innerHTML = choices
+    .map((language) => {
+      const label = language === "auto" ? "Auto-detect" : formatLanguageLabel(language);
+      return `<option value="${language}">${label}</option>`;
+    })
+    .join("");
+
+  select.value = choices.includes(selectedValue) ? selectedValue : "auto";
+}
+
+async function updateSourceLanguagePreference(nextLanguage) {
+  const normalizedLanguage = normalizeSourceLanguageSelection(nextLanguage);
+  currentSourceLanguage = normalizedLanguage;
+  const select = document.getElementById("sourceLanguageSelect");
+  if (select) select.value = normalizedLanguage;
+
+  const settings = await chrome.storage.local.get("ytd_settings");
+  const existing = settings.ytd_settings || {};
+  const merged = YTD_SETTINGS.normalize({ ...existing, sourceLanguage: normalizedLanguage });
+  await chrome.storage.local.set({ ytd_settings: merged });
+}
+
+async function refreshSourceLanguageSelection() {
+  const select = document.getElementById("sourceLanguageSelect");
+  if (!select) return;
+
+  const currentValue = normalizeSourceLanguageSelection(currentSourceLanguage);
+  const metadataLanguages = Array.isArray(currentVideoMetadata?.captionLanguages)
+    ? currentVideoMetadata.captionLanguages
+    : [];
+  const languages = Array.from(
+    new Set([
+      "auto",
+      ...metadataLanguages.map((entry) => normalizeSourceLanguageSelection(entry)),
+      ...currentAvailableSourceLanguages.map((entry) => normalizeSourceLanguageSelection(entry)),
+    ]),
+  );
+  select.innerHTML = languages
+    .map((language) => `
+      <option value="${language}">${language === "auto" ? "Auto-detect" : formatLanguageLabel(language)}</option>
+    `)
+    .join("");
+  select.value = languages.includes(currentValue) ? currentValue : "auto";
+}
+
+async function onSourceLanguageChange() {
+  const select = document.getElementById("sourceLanguageSelect");
+  if (!select || !currentVideoId) return;
+
+  const nextLanguage = normalizeSourceLanguageSelection(select.value);
+  if (!nextLanguage) return;
+
+  currentSourceLanguage = nextLanguage;
+  currentTranscriptLanguage = null;
+  currentAvailableSourceLanguages = currentAvailableSourceLanguages.filter((language) => normalizeSourceLanguageSelection(language) !== nextLanguage || nextLanguage === "auto");
+  currentTranscript = null;
+  currentTranscriptText = null;
+  currentTranscriptTimestamped = null;
+  currentAnalysis = null;
+  transcriptParagraphCache.clear();
+  await updateSourceLanguagePreference(nextLanguage);
+  await startDigest(currentVideoId, currentVideoUrl, nextLanguage);
 }
 
 // ============================================================
@@ -466,6 +662,7 @@ async function checkCurrentTab() {
 
     if (videoId) {
       currentVideoUrl = tab.url;
+      currentVideoMetadata = null;
 
       try {
         // Route through background script for reliable message passing
@@ -479,6 +676,14 @@ async function checkCurrentTab() {
           currentChannelName = result.response.channelName || "";
           currentVideoDescription = result.response.description || "";
           currentVideoDuration = result.response.duration || 0;
+          currentVideoMetadata = {
+            defaultAudioLanguage: result.response.defaultAudioLanguage || "",
+            audioLanguage: result.response.audioLanguage || "",
+            captionLanguages: Array.isArray(result.response.captionLanguages)
+              ? result.response.captionLanguages
+              : [],
+          };
+          currentAvailableSourceLanguages = currentVideoMetadata.captionLanguages.slice();
         }
       } catch (e) {
         console.error("[YouTube Digest Panel] getVideoInfo error:", e);
@@ -527,24 +732,29 @@ function extractVideoId(url) {
 // DIGEST PIPELINE
 // ============================================================
 
-async function startDigest(videoId, videoUrl) {
+async function startDigest(videoId, videoUrl, sourceLanguageOverride = currentSourceLanguage) {
+  const requestedSourceLanguage = normalizeSourceLanguageSelection(sourceLanguageOverride || currentSourceLanguage || "auto");
+  currentSourceLanguage = requestedSourceLanguage;
+
   // Check if we already have this video loaded in memory
-  if (videoId === currentVideoId && currentAnalysis) {
+  if (videoId === currentVideoId && currentAnalysis && currentSourceLanguage === requestedSourceLanguage) {
     showState("results");
     return;
   }
 
   // Every video change invalidates observer work and in-flight translations.
   if (videoId !== currentVideoId) {
+    currentTargetLanguage = currentDefaultTargetLanguage;
+    refreshTargetLanguageSelection();
     translationGeneration += 1;
     if (transcriptScrollObserver) transcriptScrollObserver.disconnect();
     transcriptScrollObserver = null;
   }
 
   // Check cache for this video
-  const cached = await loadFromCache(videoId);
+  const cached = await loadFromCache(videoId, requestedSourceLanguage);
   if (cached) {
-    debugLog("Loading from cache:", videoId);
+    debugLog("Loading from cache:", videoId, requestedSourceLanguage);
     currentVideoId = videoId;
     currentVideoUrl = videoUrl;
     currentAnalysis = cached.analysis || null;
@@ -552,6 +762,21 @@ async function startDigest(videoId, videoUrl) {
     currentTranscriptText = cached.transcriptText;
     currentTranscriptTimestamped = cached.transcriptTimestamped;
     currentTranscriptLanguage = cached.transcriptLanguage || null;
+    currentResolvedSourceLanguage =
+      normalizeSourceLanguageSelection(
+        cached.detectedSourceLanguage ||
+          cached.resolvedSourceLanguage ||
+          cached.transcriptLanguage ||
+          "auto",
+      );
+    currentAvailableSourceLanguages = Array.isArray(cached.availableLanguages)
+      ? cached.availableLanguages
+      : (currentTranscriptLanguage ? [currentTranscriptLanguage] : []);
+    // Cache hits must rebuild the language dropdown too. Previously only fresh
+    // Supadata responses called refreshSourceLanguageSelection(), so reopening
+    // a cached video left the native <select> with just its initial Auto item.
+    await refreshSourceLanguageSelection();
+    refreshTargetLanguageSelection();
     isAnalysisLoading = false;
 
     // Restore semantic-segment translations from persistent storage.
@@ -596,6 +821,8 @@ async function startDigest(videoId, videoUrl) {
   currentTranscriptText = null;
   currentTranscriptTimestamped = null;
   currentTranscriptLanguage = null;
+  currentResolvedSourceLanguage = null;
+  currentAvailableSourceLanguages = [];
   isAnalysisLoading = false;
 
   if (currentVideoTitle || currentChannelName) {
@@ -611,6 +838,8 @@ async function startDigest(videoId, videoUrl) {
   const transcriptResult = await chrome.runtime.sendMessage({
     action: "fetchTranscript",
     videoId: videoId,
+    sourceLanguage: requestedSourceLanguage,
+    videoMetadata: currentVideoMetadata,
   });
 
   if (!transcriptResult.success) {
@@ -632,6 +861,21 @@ async function startDigest(videoId, videoUrl) {
   currentTranscriptText = transcriptResult.transcriptText;
   currentTranscriptTimestamped = transcriptResult.transcriptTextTimestamped;
   currentTranscriptLanguage = transcriptResult.language || null;
+  currentResolvedSourceLanguage = normalizeSourceLanguageSelection(
+    transcriptResult.sourceLanguage || transcriptResult.language || "auto",
+  );
+  currentAvailableSourceLanguages = Array.from(
+    new Set([
+      ...(Array.isArray(currentVideoMetadata?.captionLanguages)
+        ? currentVideoMetadata.captionLanguages
+        : []),
+      ...(Array.isArray(transcriptResult.availableLanguages)
+        ? transcriptResult.availableLanguages
+        : []),
+      ...(currentTranscriptLanguage ? [currentTranscriptLanguage] : []),
+    ].filter(Boolean)),
+  );
+  await refreshSourceLanguageSelection();
 
   // Render transcript immediately (no LLM needed)
   renderTranscript();
@@ -646,7 +890,7 @@ async function startDigest(videoId, videoUrl) {
   if (currentTranscriptMode !== "original") translateTranscript();
 
   // Save transcript to cache (without analysis)
-  await saveToCache(videoId);
+  await saveToCache(videoId, requestedSourceLanguage);
 
   // DON'T run LLM analysis automatically - wait for user to click Overview tab
   // This saves tokens when user just wants to see the transcript
@@ -1338,7 +1582,7 @@ function getTranscriptContext(selectedText) {
  * without consuming API tokens or Supadata calls.
  * Cache expires after 30 days. Oldest entries evicted when > 20 videos cached.
  */
-async function saveToCache(videoId) {
+async function saveToCache(videoId, sourceLanguage = currentSourceLanguage) {
   if (!videoId || !currentTranscript) return;
 
   try {
@@ -1356,16 +1600,22 @@ async function saveToCache(videoId) {
       transcriptText: currentTranscriptText,
       transcriptTimestamped: currentTranscriptTimestamped,
       transcriptLanguage: currentTranscriptLanguage,
+      availableLanguages: currentAvailableSourceLanguages,
+      sourceLanguage: normalizeSourceLanguageSelection(sourceLanguage),
+      detectedSourceLanguage:
+        normalizeSourceLanguageSelection(currentResolvedSourceLanguage || "auto"),
       videoTitle: currentVideoTitle,
       channelName: currentChannelName,
       paragraphCache: paragraphCacheForVideo,
       timestamp: Date.now(),
     };
 
-    await chrome.storage.local.set({ [`digest_${videoId}`]: cacheData });
+    const cacheKey = getTranscriptCacheKey(videoId, sourceLanguage);
+    await chrome.storage.local.set({ [cacheKey]: cacheData });
     debugLog(
       "Saved to cache:",
       videoId,
+      cacheKey,
       currentAnalysis ? "(with analysis)" : "(transcript only)",
     );
 
@@ -1422,23 +1672,111 @@ async function evictOldCacheEntries(maxEntries) {
  * Loads digest results from persistent local storage.
  * Returns null if not cached or expired (30-day expiry).
  */
-async function loadFromCache(videoId) {
-  if (!videoId) return null;
+async function loadFromCacheLegacyData(allData, videoId, sourceLanguage = currentSourceLanguage) {
+  if (!videoId || !allData || typeof allData !== "object") return null;
 
-  try {
-    const result = await chrome.storage.local.get(`digest_${videoId}`);
-    const cached = result[`digest_${videoId}`];
+  const requestedLanguage = normalizeSourceLanguageSelection(sourceLanguage || "auto");
+  const candidates = [
+    getTranscriptCacheKey(videoId, requestedLanguage),
+    getTranscriptCacheKey(videoId, "auto"),
+    `digest_${videoId}`,
+  ];
 
-    if (!cached) return null;
+  for (const key of [...new Set(candidates)]) {
+    const cached = allData[key];
+    if (!cached) continue;
 
-    // Cache expires after 30 days
-    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
-    if (Date.now() - cached.timestamp > THIRTY_DAYS) {
-      await chrome.storage.local.remove(`digest_${videoId}`);
-      return null;
+    const storedLanguage = normalizeSourceLanguageSelection(
+      cached.transcriptLanguage || cached.sourceLanguage || "auto",
+    );
+
+    if (requestedLanguage !== "auto") {
+      if (key === `digest_${videoId}`) {
+        return cached;
+      }
+      if (storedLanguage === "auto") {
+        continue;
+      }
+      if (storedLanguage !== requestedLanguage) {
+        continue;
+      }
     }
 
     return cached;
+  }
+
+  return null;
+}
+
+async function loadFromCache(videoId, sourceLanguage = currentSourceLanguage) {
+  if (!videoId) return null;
+
+  try {
+    const selectedKey = getTranscriptCacheKey(videoId, sourceLanguage);
+    const candidates = [selectedKey];
+    if (sourceLanguage !== "auto") {
+      candidates.push(getTranscriptCacheKey(videoId, "auto"));
+    }
+    candidates.push(`digest_${videoId}`);
+
+    const uniqueKeys = [...new Set(candidates)];
+    const result = await chrome.storage.local.get(uniqueKeys);
+
+    for (const key of uniqueKeys) {
+      const cached = result[key];
+      if (!cached) continue;
+
+      const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+      if (Date.now() - (cached.timestamp || 0) > THIRTY_DAYS) {
+        await chrome.storage.local.remove(key);
+        continue;
+      }
+
+      const storedLanguage = normalizeSourceLanguageSelection(
+        cached.transcriptLanguage || cached.sourceLanguage || "auto",
+      );
+      const requestedLanguage = normalizeSourceLanguageSelection(sourceLanguage || "auto");
+
+      if (requestedLanguage !== "auto") {
+        if (storedLanguage === "auto") {
+          continue;
+        }
+        if (storedLanguage !== requestedLanguage) {
+          continue;
+        }
+      } else {
+        const detectedLanguage = YTD_SETTINGS.resolveLanguageFromVideoMetadata(
+          currentVideoMetadata,
+        );
+        const cachedDetectedLanguage = normalizeSourceLanguageSelection(
+          cached.detectedSourceLanguage || cached.resolvedSourceLanguage || "",
+        );
+
+        // An old generic auto cache can contain whichever language Supadata
+        // happened to return at the time (often English). Never let that stale
+        // entry override fresh YouTube metadata after a tab switch.
+        if (detectedLanguage) {
+          if (storedLanguage !== "auto" && storedLanguage !== detectedLanguage) {
+            continue;
+          }
+          if (cachedDetectedLanguage && cachedDetectedLanguage !== detectedLanguage) {
+            continue;
+          }
+        } else if (
+          !cachedDetectedLanguage
+        ) {
+          // Auto caches without a recorded detected language are ambiguous.
+          // This includes legacy digest_<videoId> entries that may contain an
+          // English transcript even when the video's original audio/subtitles
+          // are Portuguese. Never silently reuse them while Auto is selected.
+          continue;
+        }
+      }
+
+      return cached;
+    }
+
+    return null;
   } catch (error) {
     console.error("Cache load error:", error);
     return null;
@@ -1734,12 +2072,12 @@ function onContentAreaScroll() {
 }
 
 // ============================================================
-// TRANSCRIPT MODE UI — Original / Chinese / aligned bilingual
+// TRANSCRIPT MODE UI — Original / Translation / aligned bilingual
 // ============================================================
 
 function getOriginalTranscriptLabel() {
-  const language = String(currentTranscriptLanguage || "").trim();
-  return /^[A-Za-z0-9-]{1,20}$/.test(language)
+  const language = String(currentTranscriptLanguage || currentResolvedSourceLanguage || "").trim();
+  return /^[A-Za-z0-9-]{1,30}$/.test(language)
     ? `Original (${language})`
     : "Original";
 }
@@ -1748,8 +2086,9 @@ function getActiveTranscriptSegments() {
   return groupTranscriptEntries(currentTranscript || []);
 }
 
-function transcriptTranslationCacheKey(segment) {
-  return `${currentVideoId}:zh:semantic:${segment.id}`;
+function transcriptTranslationCacheKey(segment, targetLanguage = currentTargetLanguage) {
+  const target = normalizeTargetLanguageSelection(targetLanguage) || "zh-CN";
+  return `${currentVideoId}:${target}:semantic:${segment.id}`;
 }
 
 function setTranscriptModeButtons(mode) {
@@ -1761,10 +2100,11 @@ function setTranscriptModeButtons(mode) {
 }
 
 async function handleTranscriptModeChange(mode) {
-  if (!["original", "zh", "bilingual"].includes(mode)) return;
-  if (mode === currentTranscriptMode) return;
+  const normalizedMode = mode === "zh" ? "translation" : mode;
+  if (!["original", "translation", "bilingual"].includes(normalizedMode)) return;
+  if (normalizedMode === currentTranscriptMode) return;
 
-  currentTranscriptMode = mode;
+  currentTranscriptMode = normalizedMode;
   translationGeneration += 1;
   translationWorkCount = 0;
   setTranslatingSpinner(false);
@@ -1809,11 +2149,12 @@ function renderTranscriptModeRows(segments, mode) {
   badge.id = "transcriptSourceBadge";
   badge.className = "transcript-source-badge";
   const originalLabel = getOriginalTranscriptLabel();
+  const targetLabel = getTargetLanguageName(currentTargetLanguage);
   const modeLabel =
     mode === "bilingual"
-      ? `${originalLabel} + 简体中文`
-      : `简体中文 · translated from ${originalLabel}`;
-  badge.innerHTML = `<span class="source-dot source-dot--subs"></span> From video subtitles · ${modeLabel}`;
+      ? `${originalLabel} + ${targetLabel}`
+      : `${targetLabel} · translated from ${originalLabel}`;
+  badge.innerHTML = `<span class="source-dot source-dot--subs"></span> From video subtitles · ${escapeHtml(modeLabel)}`;
   transcriptList.parentElement.insertBefore(badge, transcriptList);
 
   const rows = [];
@@ -1930,7 +2271,8 @@ async function requestTranscriptTranslationBatch(
         segments: sourceBatch.map(({ id, text }) => ({ id, text })),
       },
       contentType: "transcriptBatch",
-      targetLanguage: "zh",
+      targetLanguage: currentTargetLanguage,
+      sourceLanguage: currentResolvedSourceLanguage || currentTranscriptLanguage || "auto",
       videoTitle: currentVideoTitle,
     });
 
@@ -2082,4 +2424,11 @@ globalThis.__YTD_TRANSCRIPT_TESTING__ = {
   alignTranslatedSegmentBatch,
   renderSubtitleInlineMarkup,
   renderTranscriptSegmentContent,
+  normalizeSourceLanguageSelection,
+  normalizeTargetLanguageSelection,
+  formatLanguageLabel,
+  getTargetLanguageName,
+  refreshTargetLanguageSelection,
+  getTranscriptCacheKey,
+  loadFromCacheLegacyData,
 };

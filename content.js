@@ -728,11 +728,33 @@ function extractVideoInfo() {
       "ytd-expander#description yt-attributed-string",
   );
 
+  let defaultAudioLanguage = "";
+  let audioLanguage = "";
+  try {
+    const player = document.getElementById("movie_player");
+    let playerResponse = player?.getPlayerResponse?.() || null;
+    if (!playerResponse) playerResponse = window.ytInitialPlayerResponse || null;
+    if (!playerResponse) {
+      const raw = window.ytplayer?.config?.args?.player_response;
+      if (typeof raw === "string") {
+        try { playerResponse = JSON.parse(raw); } catch (_error) {}
+      } else if (raw && typeof raw === "object") {
+        playerResponse = raw;
+      }
+    }
+    const details = playerResponse?.videoDetails || {};
+    defaultAudioLanguage = details.defaultAudioLanguage || details.audioLanguage || "";
+    audioLanguage = details.audioLanguage || "";
+  } catch (_error) {
+    defaultAudioLanguage = "";
+  }
+
   return {
     title: titleElement?.textContent?.trim() || "",
     channelName: channelElement?.textContent?.trim() || "",
     duration: videoElement?.duration || 0,
     description: descriptionElement?.textContent?.trim() || "",
+    defaultAudioLanguage,
   };
 }
 

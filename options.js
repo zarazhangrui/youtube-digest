@@ -2,6 +2,18 @@ const YTD_OPTIONS = (() => {
   const LANGUAGE_STORAGE_KEY = "ytd_options_language";
   const PREVIEW_STORAGE_PREFIX = "youtubeDigestPreview:";
   const SUPPORTED_LANGUAGES = new Set(["en", "zh-CN"]);
+  const TARGET_LANGUAGES = Object.freeze([
+    ["zh-CN", "中文 (简体)"], ["zh-TW", "中文 (繁體)"], ["en", "English"],
+    ["pt-PT", "Português (Portugal)"], ["pt-BR", "Português (Brasil)"],
+    ["es", "Español"], ["fr", "Français"], ["de", "Deutsch"],
+    ["it", "Italiano"], ["nl", "Nederlands"], ["sv", "Svenska"],
+    ["da", "Dansk"], ["no", "Norsk"], ["fi", "Suomi"], ["pl", "Polski"],
+    ["cs", "Čeština"], ["tr", "Türkçe"], ["el", "Ελληνικά"],
+    ["uk", "Українська"], ["ru", "Русский"], ["ar", "العربية"],
+    ["he", "עברית"], ["fa", "فارسی"], ["hi", "हिन्दी"], ["id", "Bahasa Indonesia"],
+    ["ms", "Bahasa Melayu"], ["th", "ไทย"], ["vi", "Tiếng Việt"],
+    ["ja", "日本語"], ["ko", "한국어"],
+  ]);
 
   const COPY = {
     en: {
@@ -9,14 +21,38 @@ const YTD_OPTIONS = (() => {
       languageGroupLabel: "Interface language",
       heading: "Bring your own API keys",
       lede:
-        "Keys stay in this Chrome profile and are sent only to Supadata and DeepSeek. This open-source extension has no developer server or analytics.",
+        "Keys stay in this Chrome profile and are sent only to the providers you enable and Supadata. This open-source extension has no developer server or analytics.",
       transcriptProvider: "Transcript provider",
+      learningLanguagesTitle: "Learning languages",
+      learningLanguagesHelp: "Choose one or more languages you may use for translation. The default language is used when a new video is opened, but you can switch targets at any time.",
+      defaultTargetLanguageLabel: "Default target language",
+      defaultTargetLanguageHelp: "This is only the initial target for a new video. It does not limit your other preferred languages.",
       supadataApiKeyLabel: "Supadata API key",
       supadataHelp: "Used to fetch timestamped YouTube subtitles. ",
       supadataLink: "Create a Supadata account and key",
       supadataHelpSuffix:
         ". Supadata generates the key during onboarding.",
-      aiProvider: "AI provider",
+      aiProvider: "AI providers & models",
+      aiProviderHelp: "Connect one or more providers. The default model initializes new videos; each task can use its own model.",
+      defaultAiModelLabel: "Default AI model",
+      translationModelLabel: "Translation",
+      explanationModelLabel: "Explanation",
+      analysisModelLabel: "Overview / analysis",
+      noteModelLabel: "Note polishing",
+      deepseekProvider: "DeepSeek",
+      geminiProvider: "Google Gemini",
+      openaiProvider: "OpenAI",
+      customProvider: "Custom OpenAI-compatible",
+      providerEnabled: "Enabled",
+      apiKeyLabel: "API key",
+      modelLabel: "Model",
+      baseUrlLabel: "Base URL",
+      customModelLabel: "Custom model ID",
+      testConnection: "Test connection",
+      testing: "Testing…",
+      connectionSuccess: ({ model }) => `Connection successful: ${model}`,
+      connectionFailed: ({ error }) => `Connection failed: ${error}`,
+      customPermissionHelp: "Custom endpoints require Chrome host permission for that API origin. Chrome will ask before granting it.",
       providerSummaryLabel: "Supported AI provider",
       providerBadge: "Supported in this version",
       deepseekApiKeyLabel: "DeepSeek API key",
@@ -25,7 +61,7 @@ const YTD_OPTIONS = (() => {
       deepseekLink: "Create a DeepSeek API key",
       deepseekHelpSuffix: ".",
       privacyNote:
-        "When you use AI features, DeepSeek receives the video transcript and relevant video context. Review DeepSeek's terms and pricing before saving.",
+        "When you use AI features, the selected provider receives the video transcript and relevant video context. Review that provider's terms and pricing before saving.",
       saveSettings: "Save settings",
       localRemix: "Local remix",
       customizationTitle: "Want to use another AI model?",
@@ -79,13 +115,37 @@ const YTD_OPTIONS = (() => {
       languageGroupLabel: "界面语言",
       heading: "使用你自己的 API 密钥",
       lede:
-        "密钥仅保存在当前 Chrome 个人资料中，只会发送给 Supadata 和 DeepSeek。本开源扩展没有开发者服务器，也不使用分析服务。",
+        "密钥仅保存在当前 Chrome 个人资料中，只会发送给你启用的 AI 服务和 Supadata。本开源扩展没有开发者服务器，也不使用分析服务。",
       transcriptProvider: "字幕服务",
+      learningLanguagesTitle: "学习语言",
+      learningLanguagesHelp: "选择一个或多个你可能用于翻译的语言。打开新视频时使用默认语言，但你随时可以切换目标语言。",
+      defaultTargetLanguageLabel: "默认目标语言",
+      defaultTargetLanguageHelp: "这只是打开新视频时的初始目标语言，不会限制你的其他偏好语言。",
       supadataApiKeyLabel: "Supadata API 密钥",
       supadataHelp: "用于获取带时间戳的 YouTube 字幕。",
       supadataLink: "创建 Supadata 账号并获取密钥",
       supadataHelpSuffix: "。Supadata 会在引导流程中生成密钥。",
-      aiProvider: "AI 服务",
+      aiProvider: "AI 服务与模型",
+      aiProviderHelp: "可以连接一个或多个服务。默认模型用于打开新视频时初始化；不同任务可以分别使用不同模型。",
+      defaultAiModelLabel: "默认 AI 模型",
+      translationModelLabel: "翻译",
+      explanationModelLabel: "解释",
+      analysisModelLabel: "概览 / 分析",
+      noteModelLabel: "笔记润色",
+      deepseekProvider: "DeepSeek",
+      geminiProvider: "Google Gemini",
+      openaiProvider: "OpenAI",
+      customProvider: "自定义 OpenAI 兼容服务",
+      providerEnabled: "启用",
+      apiKeyLabel: "API 密钥",
+      modelLabel: "模型",
+      baseUrlLabel: "Base URL",
+      customModelLabel: "自定义模型 ID",
+      testConnection: "测试连接",
+      testing: "正在测试…",
+      connectionSuccess: ({ model }) => `连接成功：${model}`,
+      connectionFailed: ({ error }) => `连接失败：${error}`,
+      customPermissionHelp: "自定义服务需要 Chrome 授予该 API 域名的访问权限。保存或测试时 Chrome 会请求授权。",
       providerSummaryLabel: "支持的 AI 服务",
       providerBadge: "当前版本支持",
       deepseekApiKeyLabel: "DeepSeek API 密钥",
@@ -94,7 +154,7 @@ const YTD_OPTIONS = (() => {
       deepseekLink: "创建 DeepSeek API 密钥",
       deepseekHelpSuffix: "。",
       privacyNote:
-        "使用 AI 功能时，DeepSeek 会收到视频字幕及相关视频上下文。保存前请查看 DeepSeek 的服务条款和价格。",
+        "使用 AI 功能时，你选择的服务会收到视频字幕及相关视频上下文。保存前请查看对应服务的条款和价格。",
       saveSettings: "保存设置",
       localRemix: "本地改造",
       customizationTitle: "想使用其他 AI 模型？",
@@ -349,6 +409,18 @@ const YTD_OPTIONS = (() => {
     );
     const form = doc.getElementById("settingsForm");
     const aiApiKeyInput = doc.getElementById("aiApiKey");
+    const geminiApiKeyInput = doc.getElementById("geminiApiKey");
+    const openaiApiKeyInput = doc.getElementById("openaiApiKey");
+    const customApiKeyInput = doc.getElementById("customApiKey");
+    const customBaseUrlInput = doc.getElementById("customBaseUrl");
+    const customModelInput = doc.getElementById("customModel");
+    const defaultAiModel = doc.getElementById("defaultAiModel");
+    const taskModelSelects = {
+      translation: doc.getElementById("translationModel"),
+      explanation: doc.getElementById("explanationModel"),
+      analysis: doc.getElementById("analysisModel"),
+      note: doc.getElementById("noteModel"),
+    };
     const supadataApiKeyInput = doc.getElementById("supadataApiKey");
     const customizationPrompt = doc.getElementById("customizationPrompt");
     const copyCustomizationPromptBtn = doc.getElementById(
@@ -357,6 +429,8 @@ const YTD_OPTIONS = (() => {
     const copyStatus = doc.getElementById("copyStatus");
     const saveStatus = doc.getElementById("saveStatus");
     const dataStatus = doc.getElementById("dataStatus");
+    const targetLanguageOptions = doc.getElementById("targetLanguageOptions");
+    const defaultTargetLanguage = doc.getElementById("defaultTargetLanguage");
     const languageButtons = [...doc.querySelectorAll("[data-language]")];
     const statusStates = new Map();
     const promptDrafts = createPromptDrafts();
@@ -370,8 +444,16 @@ const YTD_OPTIONS = (() => {
     }
 
     function setStatus(element, key, params = {}) {
+      if (!element) return;
       statusStates.set(element, { key, params });
       renderStatus(element);
+    }
+
+    function clearStatus(element) {
+      if (!element) return;
+      statusStates.delete(element);
+      element.textContent = "";
+      element.classList.remove("success", "error", "testing");
     }
 
     function applyLanguage(language) {
@@ -412,6 +494,138 @@ const YTD_OPTIONS = (() => {
       for (const element of statusStates.keys()) renderStatus(element);
     }
 
+    function renderTargetLanguagePreferences(settings) {
+      const selected = new Set(settings.preferredTargetLanguages || ["zh-CN"]);
+      targetLanguageOptions.innerHTML = TARGET_LANGUAGES.map(([code, label]) => `
+        <label class="target-language-option">
+          <input type="checkbox" value="${code}" ${selected.has(code) ? "checked" : ""} />
+          <span>${label}</span>
+        </label>
+      `).join("");
+
+      defaultTargetLanguage.innerHTML = TARGET_LANGUAGES
+        .filter(([code]) => selected.has(code))
+        .map(([code, label]) => `<option value="${code}">${label}</option>`)
+        .join("");
+      if (!defaultTargetLanguage.options.length) {
+        const option = document.createElement("option");
+        option.value = "zh-CN";
+        option.textContent = "中文 (简体)";
+        defaultTargetLanguage.appendChild(option);
+      }
+      defaultTargetLanguage.value = selected.has(settings.defaultTargetLanguage)
+        ? settings.defaultTargetLanguage
+        : defaultTargetLanguage.options[0].value;
+    }
+
+    function readTargetLanguagePreferences() {
+      const selected = [...targetLanguageOptions.querySelectorAll("input[type=checkbox]:checked")].map((input) => input.value);
+      const preferredTargetLanguages = selected.length ? selected : ["zh-CN"];
+      const defaultValue = preferredTargetLanguages.includes(defaultTargetLanguage.value)
+        ? defaultTargetLanguage.value
+        : preferredTargetLanguages[0];
+      return { preferredTargetLanguages, defaultTargetLanguage: defaultValue };
+    }
+
+    function syncDefaultTargetOptions() {
+      const selected = [...targetLanguageOptions.querySelectorAll("input[type=checkbox]:checked")].map((input) => input.value);
+      const preferred = selected.length ? selected : ["zh-CN"];
+      const previous = defaultTargetLanguage.value;
+      defaultTargetLanguage.innerHTML = TARGET_LANGUAGES
+        .filter(([code]) => preferred.includes(code))
+        .map(([code, label]) => `<option value="${code}">${label}</option>`)
+        .join("");
+      defaultTargetLanguage.value = preferred.includes(previous) ? previous : preferred[0];
+    }
+
+    function renderModelOptions() {
+      const profiles = settingsApi.getModelProfiles();
+      const enabledProviders = new Set();
+      ["deepseek", "gemini", "openai", "custom"].forEach((id) => {
+        const input = doc.getElementById(`${id}Enabled`);
+        if (input?.checked) enabledProviders.add(id);
+      });
+      const options = Object.values(profiles)
+        .filter((profile) => enabledProviders.has(profile.provider))
+        .map((profile) => `<option value="${profile.id}">${profile.label}</option>`)
+        .join("");
+      [defaultAiModel, ...Object.values(taskModelSelects)].forEach((select) => {
+        if (!select) return;
+        const previous = select.value;
+        select.innerHTML = options;
+        if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+      });
+      const customOption = Object.values(profiles).find((profile) => profile.id === "custom");
+      if (customOption && customApiKeyInput?.value && ![...defaultAiModel.options].some((o) => o.value === "custom")) {
+        // custom is already included whenever Custom is enabled
+      }
+    }
+
+    function setProviderFields(settings) {
+      const providers = settings.providers || {};
+      ["deepseek", "gemini", "openai", "custom"].forEach((id) => {
+        const provider = providers[id] || {};
+        const enabled = doc.getElementById(`${id}Enabled`);
+        if (enabled) enabled.checked = !!provider.enabled;
+        const key = doc.getElementById(`${id}ApiKey`);
+        if (key) key.value = provider.apiKey || "";
+      });
+      if (customBaseUrlInput) customBaseUrlInput.value = providers.custom?.baseUrl || "";
+      if (customModelInput) customModelInput.value = providers.custom?.model || "";
+      renderModelOptions();
+      defaultAiModel.value = settings.defaultModel;
+      Object.entries(taskModelSelects).forEach(([task, select]) => { if (select) select.value = settings.taskModels?.[task] || settings.defaultModel; });
+    }
+
+    function readAiSettings() {
+      const providers = {
+        deepseek: { enabled: !!doc.getElementById("deepseekEnabled")?.checked, apiKey: aiApiKeyInput.value, baseUrl: "https://api.deepseek.com" },
+        gemini: { enabled: !!doc.getElementById("geminiEnabled")?.checked, apiKey: geminiApiKeyInput?.value || "", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai" },
+        openai: { enabled: !!doc.getElementById("openaiEnabled")?.checked, apiKey: openaiApiKeyInput?.value || "", baseUrl: "https://api.openai.com/v1" },
+        custom: { enabled: !!doc.getElementById("customEnabled")?.checked, apiKey: customApiKeyInput?.value || "", baseUrl: customBaseUrlInput?.value || "", model: customModelInput?.value || "" },
+      };
+      return {
+        providers,
+        defaultModel: defaultAiModel.value,
+        taskModels: Object.fromEntries(Object.entries(taskModelSelects).map(([task, select]) => [task, select?.value || defaultAiModel.value])),
+      };
+    }
+
+    async function requestCustomOriginPermission() {
+      const custom = readAiSettings().providers.custom;
+      if (!custom.enabled || !custom.baseUrl) return true;
+      let origin;
+      try { origin = new URL(custom.baseUrl).origin; } catch (_error) { throw new Error("Custom Base URL is not a valid URL."); }
+      if (!/^https:$/.test(new URL(custom.baseUrl).protocol)) throw new Error("Custom AI Base URL must use HTTPS.");
+      if (!root.chrome?.permissions?.request) return true;
+      return root.chrome.permissions.request({ origins: [`${origin}/*`] });
+    }
+
+    async function testModel(modelId, button, statusElement) {
+      if (!button) return;
+      const original = button.textContent;
+      clearStatus(statusElement);
+      button.disabled = true;
+      button.textContent = translate(currentLanguage, "testing");
+      statusElement?.classList.add("testing");
+      try {
+        const permissionGranted = await requestCustomOriginPermission();
+        if (!permissionGranted) throw new Error("Chrome host permission was not granted.");
+        const result = await root.chrome.runtime.sendMessage({ action: "testAiProvider", modelId, draftSettings: settingsApi.normalize(readAiSettings()) });
+        if (!result?.success) throw new Error(result?.error || "Unknown error");
+        statusElement?.classList.remove("testing");
+        statusElement?.classList.add("success");
+        setStatus(statusElement, "connectionSuccess", { model: result.model });
+      } catch (error) {
+        statusElement?.classList.remove("testing");
+        statusElement?.classList.add("error");
+        setStatus(statusElement, "connectionFailed", { error: error.message });
+      } finally {
+        button.disabled = false;
+        button.textContent = original;
+      }
+    }
+
     async function loadSettings() {
       try {
         const stored = await storage.get(settingsApi.STORAGE_KEY);
@@ -421,7 +635,9 @@ const YTD_OPTIONS = (() => {
         const settings = migration.settings;
 
         aiApiKeyInput.value = settings.aiApiKey;
+        setProviderFields(settings);
         supadataApiKeyInput.value = settings.supadataApiKey;
+        renderTargetLanguagePreferences(settings);
         if (migration.migrated) {
           await storage.set({ [settingsApi.STORAGE_KEY]: settings });
           setStatus(saveStatus, "migrationWarning");
@@ -444,21 +660,27 @@ const YTD_OPTIONS = (() => {
       event.preventDefault();
       setStatus(saveStatus, "saving");
 
+      const languagePreferences = readTargetLanguagePreferences();
+      const aiSettings = readAiSettings();
       const settings = settingsApi.normalize({
-        aiApiKey: aiApiKeyInput.value,
+        ...aiSettings,
         supadataApiKey: supadataApiKeyInput.value,
+        preferredTargetLanguages: languagePreferences.preferredTargetLanguages,
+        defaultTargetLanguage: languagePreferences.defaultTargetLanguage,
       });
 
       if (!settings.supadataApiKey) {
         setStatus(saveStatus, "addSupadataKey");
         return;
       }
-      if (!settings.aiApiKey) {
+      if (!Object.values(settings.providers).some((provider) => provider.enabled && provider.apiKey)) {
         setStatus(saveStatus, "addDeepseekKey");
         return;
       }
 
       try {
+        const granted = await requestCustomOriginPermission();
+        if (!granted) throw new Error("Chrome host permission was not granted.");
         await storage.set({ [settingsApi.STORAGE_KEY]: settings });
         setStatus(saveStatus, "saved");
       } catch (_error) {
@@ -521,6 +743,18 @@ const YTD_OPTIONS = (() => {
       });
     }
 
+    ["deepseekEnabled", "geminiEnabled", "openaiEnabled", "customEnabled"].forEach((id) => {
+      doc.getElementById(id)?.addEventListener("change", renderModelOptions);
+    });
+    doc.querySelectorAll("[data-test-model]").forEach((button) => {
+      const statusElement = button.closest(".connection-test-row")?.querySelector(".connection-status");
+      button.addEventListener("click", () => testModel(button.dataset.testModel, button, statusElement));
+    });
+
+    targetLanguageOptions?.addEventListener("change", (event) => {
+      if (event.target?.matches("input[type=checkbox]")) syncDefaultTargetOptions();
+    });
+
     if (doc.readyState === "loading") {
       doc.addEventListener("DOMContentLoaded", loadOptions, { once: true });
     } else {
@@ -541,6 +775,7 @@ const YTD_OPTIONS = (() => {
     updateLanguageButtonState,
     updateLocalizedPrompt,
     switchPromptDraft,
+    TARGET_LANGUAGES,
     initialize,
   };
 })();

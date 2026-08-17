@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 
 const settings = require("../settings.js");
 
-test("DeepSeek defaults use V4 Flash", () => {
+test("multi-provider settings preserve DeepSeek defaults and normalize provider configuration", () => {
   const normalized = settings.normalize({
     provider: "unexpected",
     aiApiKey: "  example-key  ",
@@ -13,17 +13,17 @@ test("DeepSeek defaults use V4 Flash", () => {
   });
 
   assert.equal(normalized.provider, "deepseek");
-  assert.equal(normalized.aiBaseUrl, "https://api.deepseek.com");
-  assert.equal(normalized.aiModel, "deepseek-v4-flash");
+  assert.equal(normalized.providers.deepseek.baseUrl, "https://api.example.com/v1");
+  assert.equal(normalized.defaultModel, "deepseek-v4-flash");
   assert.equal(normalized.aiApiKey, "example-key");
   assert.equal(normalized.supadataApiKey, "example-supadata");
   assert.equal(
-    settings.chatCompletionsUrl(),
-    "https://api.deepseek.com/chat/completions",
+    settings.chatCompletionsUrl(normalized.providers.deepseek.baseUrl),
+    "https://api.example.com/v1/chat/completions",
   );
 });
 
-test("legacy custom migration clears only the AI key and is idempotent", () => {
+test("legacy custom migration preserves the remaining settings and is idempotent", () => {
   const legacy = {
     provider: "custom",
     aiApiKey: "custom-secret",
@@ -35,9 +35,9 @@ test("legacy custom migration clears only the AI key and is idempotent", () => {
 
   assert.equal(first.migrated, true);
   assert.equal(first.settings.provider, "deepseek");
-  assert.equal(first.settings.aiBaseUrl, settings.DEFAULTS.aiBaseUrl);
-  assert.equal(first.settings.aiModel, settings.DEFAULTS.aiModel);
-  assert.equal(first.settings.aiApiKey, "");
+  assert.equal(first.settings.providers.deepseek.baseUrl, "https://api.example.com/v1");
+  assert.equal(first.settings.defaultModel, "deepseek-v4-flash");
+  assert.equal(first.settings.aiApiKey, "custom-secret");
   assert.equal(first.settings.supadataApiKey, "supadata-secret");
 
   const second = settings.migrateLegacyCustom(first.settings);
@@ -46,9 +46,25 @@ test("legacy custom migration clears only the AI key and is idempotent", () => {
 
   const configuredDeepSeek = settings.normalize({
     ...first.settings,
-    aiApiKey: "new-deepseek-key",
+    providers: {
+      ...first.settings.providers,
+      deepseek: { ...first.settings.providers.deepseek, apiKey: "dkey2" },
+    },
   });
-  assert.equal(configuredDeepSeek.aiApiKey, "new-deepseek-key");
+  assert.equal(configuredDeepSeek.aiApiKey, "dkey2");
+});
+
+test("OpenAI and multiple target languages are retained", () => {
+  const normalized = settings.normalize({
+    preferredTargetLanguages: ["pt-BR", "zh-CN", "pt-BR"],
+    defaultTargetLanguage: "pt-BR",
+    defaultModel: "gpt-5.6-luna",
+    providers: { openai: { enabled: true, apiKey: "openai-key" } },
+  });
+  assert.deepEqual(normalized.preferredTargetLanguages, ["pt-BR", "zh-CN"]);
+  assert.equal(normalized.defaultTargetLanguage, "pt-BR");
+  assert.equal(normalized.providers.openai.enabled, true);
+  assert.equal(settings.resolveModel(normalized).providerId, "openai");
 });
 
 test("Supadata receives a canonical YouTube URL", () => {
@@ -59,5 +75,13 @@ test("Supadata receives a canonical YouTube URL", () => {
   assert.throws(
     () => settings.canonicalYouTubeUrl('"><script>'),
     /Invalid YouTube video ID/,
+  );
+});
+test("sourceLanguage defaults to auto and accepts explicit BCP-47 values", () => {
+  assert.equal(settings.normalize({}).sourceLanguage, "auto");
+  assert.equal(settings.normalize({ sourceLanguage: " pt " }).sourceLanguage, "pt");
+  assert.equal(
+    settings.normalize({ sourceLanguage: "zh-Hant-TW" }).sourceLanguage,
+    "zh-Hant-TW",
   );
 });

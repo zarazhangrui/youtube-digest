@@ -343,7 +343,24 @@ body {
 }
 
 .transcript-mode-control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  min-width: 0;
+}
+
+.transcript-language-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.transcript-display-row {
   display: inline-flex;
+  align-self: flex-end;
   align-items: center;
   gap: 2px;
   padding: 3px;
@@ -1319,4 +1336,32 @@ body {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-dim);
+}
+
+.source-language-picker,
+.target-language-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+.source-language-picker label,
+.target-language-picker label {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.source-language-picker select,
+.target-language-picker select {
+  max-width: 112px;
+  padding: 4px 20px 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: 600 10px/1.3 var(--font-body);
 }

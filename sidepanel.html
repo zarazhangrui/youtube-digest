@@ -85,31 +85,47 @@
                   class="transcript-mode-control"
                   id="transcriptModeControl"
                   role="group"
-                  aria-label="Transcript language"
+                  aria-label="Transcript display controls"
                 >
-                  <button
-                    class="transcript-mode-btn active"
-                    type="button"
-                    data-transcript-mode="original"
-                    aria-pressed="true"
-                  >Original</button>
-                  <button
-                    class="transcript-mode-btn"
-                    type="button"
-                    data-transcript-mode="zh"
-                    aria-pressed="false"
-                  >中文</button>
-                  <button
-                    class="transcript-mode-btn"
-                    type="button"
-                    data-transcript-mode="bilingual"
-                    aria-pressed="false"
-                  >双语</button>
-                  <span
-                    class="translation-spinner"
-                    id="langSpinner"
-                    aria-label="Translating"
-                  ></span>
+                  <div class="transcript-language-row">
+                    <div class="source-language-picker">
+                      <label for="sourceLanguageSelect">Source</label>
+                      <select id="sourceLanguageSelect" aria-label="Source language">
+                        <option value="auto">Auto-detect</option>
+                      </select>
+                    </div>
+                    <div class="target-language-picker">
+                      <label for="targetLanguageSelect">Target</label>
+                      <select id="targetLanguageSelect" aria-label="Target language">
+                        <option value="zh-CN">中文 (简体)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="transcript-display-row">
+                    <button
+                      class="transcript-mode-btn active"
+                      type="button"
+                      data-transcript-mode="original"
+                      aria-pressed="true"
+                    >Original</button>
+                    <button
+                      class="transcript-mode-btn"
+                      type="button"
+                      data-transcript-mode="translation"
+                      aria-pressed="false"
+                    >Translation</button>
+                    <button
+                      class="transcript-mode-btn"
+                      type="button"
+                      data-transcript-mode="bilingual"
+                      aria-pressed="false"
+                    >Bilingual</button>
+                    <span
+                      class="translation-spinner"
+                      id="langSpinner"
+                      aria-label="Translating"
+                    ></span>
+                  </div>
                 </div>
               </div>
               <div class="transcript-actions">
