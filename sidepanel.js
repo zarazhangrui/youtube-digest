@@ -32,6 +32,9 @@ let errorAction = null;
 // --- Translation state ---
 // The public transcript control intentionally supports only the original
 // subtitles, Chinese, and an aligned source + Chinese view.
+const TRANSCRIPT_MODE_STORAGE_KEY = "ytd_transcript_mode";
+const TRANSCRIPT_VIEW_STATE_STORAGE_KEY = "ytd_transcript_view_state";
+const TRANSCRIPT_MODES = new Set(["original", "zh", "bilingual"]);
 let currentTranscriptMode = "original";
 let translationGeneration = 0; // Invalidates responses from older UI modes/videos.
 let translationWorkCount = 0;
@@ -39,6 +42,7 @@ let transcriptScrollObserver = null;
 // Stable keys include the video, source mode, language, and semantic segment ID.
 let transcriptParagraphCache = new Map();
 const TRANSLATION_MESSAGE_TIMEOUT_MS = 130_000;
+let selectionFeatureCleanup = null;
 
 /**
  * Prevent a stopped service worker or dead message channel from leaving the
@@ -83,7 +87,10 @@ function sendTranslationMessage(message) {
 // --- Auto-scroll state (follow video playback in transcript) ---
 let autoScrollEnabled = true; // True = scroll transcript to follow video playback
 let autoScrollInterval = null; // setInterval ID for polling video time
-let lastAutoScrollTime = 0; // Timestamp of last programmatic scroll (ignores scroll events within 1s)
+let programmaticTranscriptScroll = false;
+let programmaticTranscriptScrollTimer = null;
+let restoreTranscriptScrollTimer = null;
+let transcriptViewStateSaveTimer = null;
 
 // ============================================================
 // TRANSCRIPT GROUPING
@@ -231,6 +238,7 @@ function groupTranscriptEntries(entries, limits = TRANSCRIPT_SEGMENT_LIMITS) {
 
 document.addEventListener("DOMContentLoaded", async () => {
   setupEventListeners();
+  await restoreTranscriptMode();
   await evictOldCacheEntries(20);
 
   const configStatus = await chrome.runtime.sendMessage({
@@ -248,6 +256,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 // Listen for messages from the Digest button on YouTube page
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "startDigestFromButton") {
+    if (Number.isInteger(message.tabId)) youtubeTabId = message.tabId;
     // Load the digest for the current video. Served from cache when we've
     // seen this video before (no API calls); fetched fresh otherwise.
     // (This used to force-clear the cache on every click, which silently
@@ -314,26 +323,36 @@ function panelIsShowingResults() {
  * Reacts to the URL now in front of the panel: close on non-YouTube,
  * refresh the digest when the video changed.
  */
-function handleFrontTabUrl(url) {
+function handleFrontTab(tab) {
+  const url = tab?.url || tab?.pendingUrl || "";
   if (!(url || "").startsWith("https://www.youtube.com")) {
     // Panel is a YouTube-only tool — remove itself from non-YouTube tabs.
     window.close();
     return;
   }
 
+  if (Number.isInteger(tab?.id)) youtubeTabId = tab.id;
+
   const newVideoId = extractVideoId(url);
   // Refresh when the video changed, or when we're not currently showing
   // results (e.g. user went home, then clicked back into the same video).
   if (newVideoId !== currentVideoId || !panelIsShowingResults()) {
     scheduleDigestRefresh();
+    return;
   }
+
+  // Same video, different/front tab: do not rebuild the transcript, but do
+  // immediately re-bind Follow playback to the tab the user is actually
+  // looking at. This fixes the common multi-tab case where Chrome recreates
+  // the side panel and the transcript falls back to an old saved position.
+  playbackTrackingTick(true);
 }
 
 // Fires when a tab's URL changes — including YouTube's no-reload navigation.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (!changeInfo.url || !tab.active) return;
   if (panelWindowId !== null && tab.windowId !== panelWindowId) return;
-  handleFrontTabUrl(changeInfo.url);
+  handleFrontTab({ ...tab, id: tabId, url: changeInfo.url });
 });
 
 // Fires when a different tab comes to the front — switching tabs, or a new
@@ -344,7 +363,7 @@ chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
     const tab = await chrome.tabs.get(tabId);
     // Brand-new tabs may not have committed their URL yet — fall back to
     // the pending one so we judge where the tab is actually going.
-    handleFrontTabUrl(tab.url || tab.pendingUrl || "");
+    handleFrontTab(tab);
   } catch (e) {
     // Tab closed before we could read it — nothing to do.
   }
@@ -387,16 +406,15 @@ function setupEventListeners() {
   // Follow playback button — re-enables auto-scroll after user scrolled away
   document
     .getElementById("followPlaybackBtn")
-    ?.addEventListener("click", () => {
+    ?.addEventListener("click", async () => {
       autoScrollEnabled = true;
       document.getElementById("followPlaybackBtn").style.display = "none";
-      // Jump straight back to the line currently being spoken. We scroll
-      // directly (not via playbackTrackingTick) because the tick skips
-      // entries that are already highlighted — and the current line almost
-      // always IS highlighted, which made this button appear to do nothing.
-      if (!scrollToActiveEntry()) {
-        playbackTrackingTick(); // No highlight yet — let a tick establish one
-      }
+      // The old highlighted line can be several sentences behind after the
+      // reader has scrolled away. Refresh the actual player time before
+      // scrolling, rather than jumping back to that stale highlight.
+      const didScroll = await playbackTrackingTick(true);
+      if (!didScroll) scrollToActiveEntry();
+      saveTranscriptViewStateSoon();
     });
 
   // Notes filter buttons
@@ -428,27 +446,37 @@ async function checkCurrentTab() {
     // Try multiple strategies to find the YouTube tab
     let tab = null;
 
-    // Strategy 1: Active tab in last focused window
-    let tabs = await chrome.tabs.query({
-      active: true,
-      lastFocusedWindow: true,
-    });
+    // Strategy 1: Active tab in the browser window this side panel belongs to.
+    // This keeps multiple YouTube tabs from stealing Follow playback from each
+    // other when the panel is recreated after a tab switch.
+    let activeTabQuery = { active: true };
+    if (panelWindowId !== null) activeTabQuery.windowId = panelWindowId;
+    else activeTabQuery.lastFocusedWindow = true;
+
+    let tabs = await chrome.tabs.query(activeTabQuery);
     if (tabs[0]?.url?.includes("youtube.com")) {
       tab = tabs[0];
     }
 
-    // Strategy 2: Any active YouTube tab
+    // Strategy 2: Any active YouTube tab in this same window
     if (!tab) {
-      tabs = await chrome.tabs.query({
+      const activeYouTubeQuery = {
         url: "https://www.youtube.com/*",
         active: true,
-      });
+      };
+      if (panelWindowId !== null) activeYouTubeQuery.windowId = panelWindowId;
+      tabs = await chrome.tabs.query(activeYouTubeQuery);
       if (tabs[0]) tab = tabs[0];
     }
 
-    // Strategy 3: Any YouTube tab (last resort)
+    // Strategy 3: Any YouTube tab in this window (last resort)
     if (!tab) {
-      tabs = await chrome.tabs.query({ url: "https://www.youtube.com/*" });
+      const anyYouTubeQuery = { url: "https://www.youtube.com/*" };
+      if (panelWindowId !== null) anyYouTubeQuery.windowId = panelWindowId;
+      tabs = await chrome.tabs.query(anyYouTubeQuery);
+      if (!tabs[0] && panelWindowId !== null) {
+        tabs = await chrome.tabs.query({ url: "https://www.youtube.com/*" });
+      }
       if (tabs[0]) tab = tabs[0];
     }
 
@@ -468,17 +496,16 @@ async function checkCurrentTab() {
       currentVideoUrl = tab.url;
 
       try {
-        // Route through background script for reliable message passing
         const result = await chrome.runtime.sendMessage({
-          action: "relayToContent",
-          payload: { action: "getVideoInfo" },
+          action: "getVideoInfo",
+          tabId: youtubeTabId,
         });
         debugLog("[YouTube Digest Panel] getVideoInfo result:", result);
-        if (result.success && result.response) {
-          currentVideoTitle = result.response.title || "";
-          currentChannelName = result.response.channelName || "";
-          currentVideoDescription = result.response.description || "";
-          currentVideoDuration = result.response.duration || 0;
+        if (result) {
+          currentVideoTitle = result.title || "";
+          currentChannelName = result.channelName || "";
+          currentVideoDescription = result.description || "";
+          currentVideoDuration = result.duration || 0;
         }
       } catch (e) {
         console.error("[YouTube Digest Panel] getVideoInfo error:", e);
@@ -529,8 +556,11 @@ function extractVideoId(url) {
 
 async function startDigest(videoId, videoUrl) {
   // Check if we already have this video loaded in memory
-  if (videoId === currentVideoId && currentAnalysis) {
+  if (videoId === currentVideoId && currentTranscript) {
     showState("results");
+    renderVideoInfo();
+    startPlaybackTracking({ preserveFollowState: true });
+    if (currentTranscriptMode !== "original") ensureMissingTranscriptTranslations();
     return;
   }
 
@@ -539,6 +569,7 @@ async function startDigest(videoId, videoUrl) {
     translationGeneration += 1;
     if (transcriptScrollObserver) transcriptScrollObserver.disconnect();
     transcriptScrollObserver = null;
+    autoScrollEnabled = true;
   }
 
   // Check cache for this video
@@ -547,6 +578,17 @@ async function startDigest(videoId, videoUrl) {
     debugLog("Loading from cache:", videoId);
     currentVideoId = videoId;
     currentVideoUrl = videoUrl;
+    // YouTube page metadata can be unavailable briefly after navigation. Keep
+    // the live value when present, otherwise restore the title and author that
+    // were saved with this video's digest.
+    currentVideoTitle = chooseVideoMetadata(
+      currentVideoTitle,
+      cached.videoTitle,
+    );
+    currentChannelName = chooseVideoMetadata(
+      currentChannelName,
+      cached.channelName,
+    );
     currentAnalysis = cached.analysis || null;
     currentTranscript = cached.transcript;
     currentTranscriptText = cached.transcriptText;
@@ -561,12 +603,7 @@ async function startDigest(videoId, videoUrl) {
       }
     }
 
-    if (currentVideoTitle || currentChannelName) {
-      const videoInfo = document.getElementById("videoInfo");
-      document.getElementById("videoTitle").textContent = currentVideoTitle;
-      document.getElementById("videoChannel").textContent = currentChannelName;
-      videoInfo.style.display = "block";
-    }
+    renderVideoInfo();
 
     // Always render transcript first
     renderTranscript();
@@ -598,12 +635,7 @@ async function startDigest(videoId, videoUrl) {
   currentTranscriptLanguage = null;
   isAnalysisLoading = false;
 
-  if (currentVideoTitle || currentChannelName) {
-    const videoInfo = document.getElementById("videoInfo");
-    document.getElementById("videoTitle").textContent = currentVideoTitle;
-    document.getElementById("videoChannel").textContent = currentChannelName;
-    videoInfo.style.display = "block";
-  }
+  renderVideoInfo();
 
   showState("loading");
   updateLoading("Fetching transcript", "");
@@ -655,6 +687,22 @@ async function startDigest(videoId, videoUrl) {
 // ============================================================
 // RENDERING
 // ============================================================
+
+function chooseVideoMetadata(liveValue, cachedValue) {
+  return String(liveValue || cachedValue || "").trim();
+}
+
+function renderVideoInfo() {
+  const videoInfo = document.getElementById("videoInfo");
+  const videoTitle = document.getElementById("videoTitle");
+  const videoChannel = document.getElementById("videoChannel");
+  if (!videoInfo || !videoTitle || !videoChannel) return;
+
+  videoTitle.textContent = currentVideoTitle;
+  videoChannel.textContent = currentChannelName;
+  videoInfo.style.display =
+    currentVideoTitle || currentChannelName ? "block" : "none";
+}
 
 /**
  * Renders the analysis results into the Overview tab.
@@ -865,8 +913,7 @@ function renderTranscript() {
     transcriptList.appendChild(div);
   });
 
-  // Start tracking video playback for auto-scroll
-  startPlaybackTracking();
+  if (currentTranscriptMode === "original") activateTranscriptAfterRender();
 }
 
 function copyTranscript() {
@@ -967,9 +1014,10 @@ function switchTab(tabName) {
 
   // Start/stop playback tracking based on which tab is active
   if (tabName === "transcript") {
-    startPlaybackTracking();
+    startPlaybackTracking({ preserveFollowState: true });
   } else {
-    stopPlaybackTracking();
+    saveTranscriptViewStateSoon();
+    stopPlaybackTracking({ resetFollowState: false });
   }
 
   // Lazy-load LLM analysis when user switches to Overview tab
@@ -1065,6 +1113,7 @@ async function seekTo(seconds) {
     // Fallback: route through background script
     const result = await chrome.runtime.sendMessage({
       action: "relayToContent",
+      tabId: youtubeTabId,
       payload,
     });
     debugLog("[YouTube Digest Panel] seekTo relay result:", result);
@@ -1096,6 +1145,7 @@ async function highlightMomentsOnPage(moments) {
     // Route through background script for reliable message passing
     await chrome.runtime.sendMessage({
       action: "relayToContent",
+      tabId: youtubeTabId,
       payload: {
         action: "highlightMoments",
         moments: moments,
@@ -1183,6 +1233,11 @@ function setupExplainFeature() {
   const transcriptList = document.getElementById("transcriptList");
   if (!transcriptList) return;
 
+  if (selectionFeatureCleanup) {
+    selectionFeatureCleanup();
+    selectionFeatureCleanup = null;
+  }
+
   // Remove existing tooltip if any
   const existingTooltip = document.getElementById("explainTooltip");
   if (existingTooltip) existingTooltip.remove();
@@ -1191,7 +1246,7 @@ function setupExplainFeature() {
   const tooltip = document.createElement("div");
   tooltip.id = "explainTooltip";
   tooltip.className = "explain-tooltip";
-  tooltip.innerHTML = `<button class="explain-btn">💡 Explain</button>`;
+  tooltip.innerHTML = `<button class="explain-btn">Explain</button>`;
   tooltip.style.display = "none";
   document.body.appendChild(tooltip);
 
@@ -1211,7 +1266,7 @@ function setupExplainFeature() {
   });
 
   // Listen for text selection
-  document.addEventListener("mouseup", (e) => {
+  const handleSelectionMouseup = () => {
     const selection = window.getSelection();
     const text = selection.toString().trim();
 
@@ -1232,14 +1287,16 @@ function setupExplainFeature() {
     } else {
       tooltip.style.display = "none";
     }
-  });
+  };
+  document.addEventListener("mouseup", handleSelectionMouseup);
 
   // Hide tooltip when clicking elsewhere
-  document.addEventListener("mousedown", (e) => {
+  const handleDocumentMousedown = (e) => {
     if (!tooltip.contains(e.target)) {
       tooltip.style.display = "none";
     }
-  });
+  };
+  document.addEventListener("mousedown", handleDocumentMousedown);
 
   // Handle explain button click
   tooltip
@@ -1252,6 +1309,12 @@ function setupExplainFeature() {
       tooltip.style.display = "none";
       await showExplanation(selectedText);
     });
+
+  selectionFeatureCleanup = () => {
+    document.removeEventListener("mouseup", handleSelectionMouseup);
+    document.removeEventListener("mousedown", handleDocumentMousedown);
+    tooltip.remove();
+  };
 }
 
 /**
@@ -1596,35 +1659,54 @@ async function deleteNote(noteId) {
  * Starts polling the video's current time and highlighting/scrolling
  * to the matching transcript entry.
  */
-function startPlaybackTracking() {
+function startPlaybackTracking({ preserveFollowState = false } = {}) {
   if (!currentTranscript || !currentTranscript.length) return;
 
   // Don't restart if already tracking (preserves user's auto-scroll state)
   if (autoScrollInterval) return;
 
-  autoScrollEnabled = true;
-  document.getElementById("followPlaybackBtn").style.display = "none";
+  if (!preserveFollowState) autoScrollEnabled = true;
+  document.getElementById("followPlaybackBtn").style.display = autoScrollEnabled
+    ? "none"
+    : "block";
 
   // Poll video time every 500ms
   autoScrollInterval = setInterval(() => playbackTrackingTick(), 500);
+  // Do not make the user wait for the first polling interval before the
+  // current subtitle is highlighted and available to the follow button.
+  playbackTrackingTick(true);
 
-  // Listen for manual scrolls on the content area
+  // A plain scroll event cannot tell user movement from scrollIntoView().
+  // Track the full lifetime of our smooth scroll and separately listen for
+  // explicit user input so programmatic movement never disables following.
   const contentArea = document.getElementById("contentArea");
   contentArea.removeEventListener("scroll", onContentAreaScroll);
   contentArea.addEventListener("scroll", onContentAreaScroll);
+  contentArea.removeEventListener("scrollend", onContentAreaScrollEnd);
+  contentArea.addEventListener("scrollend", onContentAreaScrollEnd);
+  contentArea.removeEventListener("wheel", onManualTranscriptNavigation);
+  contentArea.addEventListener("wheel", onManualTranscriptNavigation, {
+    passive: true,
+  });
+  contentArea.removeEventListener("touchstart", onManualTranscriptNavigation);
+  contentArea.addEventListener("touchstart", onManualTranscriptNavigation, {
+    passive: true,
+  });
+  contentArea.removeEventListener("pointerdown", onTranscriptPointerDown);
+  contentArea.addEventListener("pointerdown", onTranscriptPointerDown);
 }
 
 /**
  * Stops playback tracking entirely. Called when leaving transcript tab,
  * starting a new digest, or leaving results state.
  */
-function stopPlaybackTracking() {
+function stopPlaybackTracking({ resetFollowState = true } = {}) {
   if (autoScrollInterval) {
     clearInterval(autoScrollInterval);
     autoScrollInterval = null;
   }
-  autoScrollEnabled = true; // Reset for next time
-  lastAutoScrollTime = 0;
+  if (resetFollowState) autoScrollEnabled = true; // Reset for next video/state
+  finishProgrammaticTranscriptScroll();
   document.getElementById("followPlaybackBtn").style.display = "none";
 
   // Remove active highlights
@@ -1635,32 +1717,56 @@ function stopPlaybackTracking() {
     });
 }
 
+async function activateTranscriptAfterRender() {
+  await restoreTranscriptViewStateAfterRender();
+  startPlaybackTracking({ preserveFollowState: true });
+}
+
 /**
  * One tick of the playback tracker. Gets current video time from the
  * YouTube tab and highlights + scrolls to the matching transcript entry.
  */
-async function playbackTrackingTick() {
+async function playbackTrackingTick(forceScroll = false) {
   try {
-    const result = await chrome.runtime.sendMessage({
-      action: "relayToContent",
-      payload: { action: "getCurrentTime" },
-    });
+    const playbackState = await getPlaybackState();
+    if (!playbackState) return false;
 
-    if (!result.success || !result.response) return;
-
-    const currentTime = result.response.currentTime || 0;
-    highlightActiveEntry(currentTime);
+    const currentTime = playbackState.currentTime || 0;
+    return highlightActiveEntry(currentTime, forceScroll);
   } catch (error) {
     // Silently ignore — YouTube tab might be closed or navigated away
+    return false;
   }
+}
+
+/**
+ * Read from the exact YouTube tab selected for this side panel. Asking the
+ * background to locate an active tab can pick a different browser tab after a
+ * tab switch, leaving Follow playback with no usable position to follow.
+ */
+async function getPlaybackState() {
+  const payload = { action: "getCurrentTime" };
+
+  if (Number.isInteger(youtubeTabId)) {
+    try {
+      return await chrome.tabs.sendMessage(youtubeTabId, payload);
+    } catch (error) {
+      debugLog("[YouTube Digest Panel] Direct playback lookup failed:", error);
+    }
+  }
+
+  const result = await chrome.runtime.sendMessage({
+    action: "relayToContent",
+    tabId: youtubeTabId,
+    payload,
+  });
+  return result?.success ? result.response : null;
 }
 
 /**
  * Scrolls the transcript to the entry currently being spoken (the one
  * carrying the active-playback highlight). Returns false if nothing is
- * highlighted yet. Stamps lastAutoScrollTime BEFORE scrolling so the scroll
- * events from our own smooth animation aren't mistaken for the user
- * scrolling away (which would re-disable auto-scroll immediately).
+ * highlighted yet.
  */
 function scrollToActiveEntry() {
   const activeEntry = document.querySelector(
@@ -1668,9 +1774,60 @@ function scrollToActiveEntry() {
   );
   if (!activeEntry) return false;
 
-  lastAutoScrollTime = Date.now();
-  activeEntry.scrollIntoView({ behavior: "smooth", block: "center" });
+  scrollTranscriptEntryIntoView(activeEntry);
   return true;
+}
+
+function findTranscriptEntryForTime(entries, currentSeconds) {
+  let activeEntry = null;
+  entries.forEach((entry, index) => {
+    const entrySeconds = parseTranscriptEntrySeconds(entry);
+    const nextEntry = entries[index + 1];
+    const nextSeconds = nextEntry
+      ? parseTranscriptEntrySeconds(nextEntry)
+      : Infinity;
+
+    if (currentSeconds >= entrySeconds && currentSeconds < nextSeconds) {
+      activeEntry = entry;
+    }
+  });
+  return activeEntry;
+}
+
+function parseTranscriptEntrySeconds(entry) {
+  const seconds = Number(entry?.dataset?.seconds);
+  return Number.isFinite(seconds) ? seconds : 0;
+}
+
+function beginProgrammaticTranscriptScroll() {
+  programmaticTranscriptScroll = true;
+  if (programmaticTranscriptScrollTimer) {
+    clearTimeout(programmaticTranscriptScrollTimer);
+  }
+  // Chrome supports scrollend, but keep a safety reset for interrupted
+  // animations and older environments.
+  programmaticTranscriptScrollTimer = setTimeout(
+    finishProgrammaticTranscriptScroll,
+    5000,
+  );
+}
+
+function finishProgrammaticTranscriptScroll() {
+  programmaticTranscriptScroll = false;
+  if (programmaticTranscriptScrollTimer) {
+    clearTimeout(programmaticTranscriptScrollTimer);
+    programmaticTranscriptScrollTimer = null;
+  }
+}
+
+function getTranscriptScrollGuardState() {
+  return { programmatic: programmaticTranscriptScroll };
+}
+
+function scrollTranscriptEntryIntoView(entry) {
+  if (!entry) return;
+  beginProgrammaticTranscriptScroll();
+  entry.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 /**
@@ -1679,31 +1836,28 @@ function scrollToActiveEntry() {
  *
  * @param {number} currentSeconds - Current video playback time in seconds
  */
-function highlightActiveEntry(currentSeconds) {
+function highlightActiveEntry(currentSeconds, forceScroll = false) {
   const transcriptList = document.getElementById("transcriptList");
-  if (!transcriptList) return;
+  if (!transcriptList) return false;
 
   const entries = transcriptList.querySelectorAll(".transcript-entry");
-  if (entries.length === 0) return;
+  if (entries.length === 0) return false;
 
   // Find the entry whose time range contains the current playback time
-  let activeEntry = null;
-  entries.forEach((entry, index) => {
-    const entrySeconds = parseInt(entry.dataset.seconds);
-    const nextEntry = entries[index + 1];
-    const nextSeconds = nextEntry
-      ? parseInt(nextEntry.dataset.seconds)
-      : Infinity;
+  const activeEntry = findTranscriptEntryForTime(entries, currentSeconds);
 
-    if (currentSeconds >= entrySeconds && currentSeconds < nextSeconds) {
-      activeEntry = entry;
+  if (!activeEntry) return false;
+
+  // Usually nothing needs updating when the same line remains active. A user
+  // who explicitly resumes Follow playback is the exception: force one scroll
+  // to the freshly confirmed current line.
+  if (activeEntry.classList.contains("active-playback")) {
+    if (forceScroll && autoScrollEnabled) {
+      scrollTranscriptEntryIntoView(activeEntry);
+      return true;
     }
-  });
-
-  if (!activeEntry) return;
-
-  // Skip if this entry is already highlighted (no DOM thrashing)
-  if (activeEntry.classList.contains("active-playback")) return;
+    return false;
+  }
 
   // Remove old highlight, add new one
   entries.forEach((e) => e.classList.remove("active-playback"));
@@ -1711,9 +1865,10 @@ function highlightActiveEntry(currentSeconds) {
 
   // Only scroll if auto-scroll is enabled
   if (autoScrollEnabled) {
-    lastAutoScrollTime = Date.now();
-    activeEntry.scrollIntoView({ behavior: "smooth", block: "center" });
+    scrollTranscriptEntryIntoView(activeEntry);
+    return true;
   }
+  return false;
 }
 
 /**
@@ -1722,14 +1877,35 @@ function highlightActiveEntry(currentSeconds) {
  * can read at their own pace without being yanked back.
  */
 function onContentAreaScroll() {
-  // Ignore scroll events within 1 second of a programmatic scroll
-  // (smooth scroll animations can last longer than a simple boolean flag)
-  if (Date.now() - lastAutoScrollTime < 1000) return;
+  if (programmaticTranscriptScroll) return;
 
-  // User scrolled manually — disable auto-scroll and show the button
+  disableAutoScrollForManualNavigation();
+  saveTranscriptViewStateSoon();
+}
+
+function onContentAreaScrollEnd() {
+  if (programmaticTranscriptScroll) finishProgrammaticTranscriptScroll();
+  saveTranscriptViewStateSoon();
+}
+
+function onManualTranscriptNavigation() {
+  // Wheel/touch input must win even if it interrupts an in-flight smooth
+  // scroll. The following scroll event will then remain classified as manual.
+  finishProgrammaticTranscriptScroll();
+  disableAutoScrollForManualNavigation();
+}
+
+function onTranscriptPointerDown(event) {
+  // A scrollbar drag targets the scroll container itself. Clicks on transcript
+  // rows keep their normal seek/select behavior and do not pause following.
+  if (event.target === event.currentTarget) onManualTranscriptNavigation();
+}
+
+function disableAutoScrollForManualNavigation() {
   if (autoScrollEnabled && autoScrollInterval) {
     autoScrollEnabled = false;
     document.getElementById("followPlaybackBtn").style.display = "block";
+    saveTranscriptViewStateSoon();
   }
 }
 
@@ -1742,6 +1918,114 @@ function getOriginalTranscriptLabel() {
   return /^[A-Za-z0-9-]{1,20}$/.test(language)
     ? `Original (${language})`
     : "Original";
+}
+
+function normalizeTranscriptMode(mode) {
+  return TRANSCRIPT_MODES.has(mode) ? mode : "original";
+}
+
+/**
+ * Restores the user's display choice whenever the side panel is recreated.
+ * This is intentionally a global preference: choosing bilingual on one video
+ * should keep that view when returning to YouTube or opening another video.
+ */
+async function restoreTranscriptMode() {
+  try {
+    const stored = await chrome.storage.local.get(TRANSCRIPT_MODE_STORAGE_KEY);
+    currentTranscriptMode = normalizeTranscriptMode(
+      stored[TRANSCRIPT_MODE_STORAGE_KEY],
+    );
+  } catch (error) {
+    console.warn("Could not restore transcript display mode:", error);
+    currentTranscriptMode = "original";
+  }
+  setTranscriptModeButtons(currentTranscriptMode);
+  return currentTranscriptMode;
+}
+
+async function persistTranscriptMode(mode) {
+  const normalizedMode = normalizeTranscriptMode(mode);
+  await chrome.storage.local.set({
+    [TRANSCRIPT_MODE_STORAGE_KEY]: normalizedMode,
+  });
+  return normalizedMode;
+}
+
+function getTranscriptViewStateKey() {
+  if (!currentVideoId) return "";
+  return `${currentVideoId}:${currentTranscriptMode}`;
+}
+
+function setCurrentVideoForTesting(videoId) {
+  currentVideoId = videoId;
+}
+
+async function readStoredTranscriptViewStates() {
+  try {
+    const stored = await chrome.storage.local.get(TRANSCRIPT_VIEW_STATE_STORAGE_KEY);
+    const states = stored[TRANSCRIPT_VIEW_STATE_STORAGE_KEY];
+    return states && typeof states === "object" ? states : {};
+  } catch (error) {
+    console.warn("Could not read transcript scroll state:", error);
+    return {};
+  }
+}
+
+async function saveTranscriptViewState() {
+  const contentArea = document.getElementById("contentArea");
+  const key = getTranscriptViewStateKey();
+  if (!contentArea || !key) return;
+
+  try {
+    const states = await readStoredTranscriptViewStates();
+    states[key] = {
+      scrollTop: contentArea.scrollTop || 0,
+      autoScrollEnabled,
+      updatedAt: Date.now(),
+    };
+    await chrome.storage.local.set({ [TRANSCRIPT_VIEW_STATE_STORAGE_KEY]: states });
+  } catch (error) {
+    console.warn("Could not save transcript scroll state:", error);
+  }
+}
+
+function saveTranscriptViewStateSoon() {
+  if (transcriptViewStateSaveTimer) {
+    clearTimeout(transcriptViewStateSaveTimer);
+  }
+  transcriptViewStateSaveTimer = setTimeout(() => {
+    transcriptViewStateSaveTimer = null;
+    saveTranscriptViewState();
+  }, 150);
+}
+
+async function restoreTranscriptViewStateAfterRender() {
+  const contentArea = document.getElementById("contentArea");
+  const key = getTranscriptViewStateKey();
+  if (!contentArea || !key) return;
+
+  const states = await readStoredTranscriptViewStates();
+  const state = states[key];
+  if (!state || typeof state !== "object") return;
+
+  autoScrollEnabled = state.autoScrollEnabled !== false;
+  const followButton = document.getElementById("followPlaybackBtn");
+  if (followButton) {
+    followButton.style.display = autoScrollEnabled ? "none" : "block";
+  }
+
+  if (autoScrollEnabled) return;
+
+  const scrollTop = Number(state.scrollTop);
+  if (!Number.isFinite(scrollTop) || scrollTop <= 0) return;
+
+  beginProgrammaticTranscriptScroll();
+  contentArea.scrollTop = scrollTop;
+  if (restoreTranscriptScrollTimer) clearTimeout(restoreTranscriptScrollTimer);
+  restoreTranscriptScrollTimer = setTimeout(() => {
+    restoreTranscriptScrollTimer = null;
+    finishProgrammaticTranscriptScroll();
+  }, 50);
 }
 
 function getActiveTranscriptSegments() {
@@ -1761,10 +2045,16 @@ function setTranscriptModeButtons(mode) {
 }
 
 async function handleTranscriptModeChange(mode) {
-  if (!["original", "zh", "bilingual"].includes(mode)) return;
+  if (!TRANSCRIPT_MODES.has(mode)) return;
   if (mode === currentTranscriptMode) return;
 
   currentTranscriptMode = mode;
+  try {
+    await persistTranscriptMode(mode);
+  } catch (error) {
+    // Keep the current view usable even if Chrome storage is temporarily unavailable.
+    console.warn("Could not save transcript display mode:", error);
+  }
   translationGeneration += 1;
   translationWorkCount = 0;
   setTranslatingSpinner(false);
@@ -1841,7 +2131,7 @@ function renderTranscriptModeRows(segments, mode) {
     rows.push(div);
   });
 
-  startPlaybackTracking();
+  activateTranscriptAfterRender();
   return rows;
 }
 
@@ -1988,6 +2278,25 @@ function retryTranslationSegment(index, generation) {
   activeTranslationQueue.enqueue(index, true);
 }
 
+function ensureMissingTranscriptTranslations() {
+  if (currentTranscriptMode === "original") return;
+  if (!activeTranslationQueue) {
+    translateTranscript();
+    return;
+  }
+
+  document
+    .querySelectorAll("#transcriptList .transcript-entry")
+    .forEach((row) => {
+      if (row.classList.contains("translated")) return;
+      const index = Number(row.dataset.segmentIndex);
+      activeTranslationQueue.enqueue(
+        index,
+        row.classList.contains("translation-failed"),
+      );
+    });
+}
+
 /**
  * Renders immediately, translates the first small batch, then observes the
  * remaining rows. Batches are sequential so the provider is never flooded.
@@ -2011,7 +2320,7 @@ async function translateTranscript() {
     if (processing || queue.length === 0 || generation !== translationGeneration)
       return;
     processing = true;
-    const indices = queue.splice(0, 3);
+    const indices = queue.splice(0, 4);
     indices.forEach((index) => queued.delete(index));
     try {
       await requestTranscriptTranslationBatch(
@@ -2061,8 +2370,14 @@ async function translateTranscript() {
 
   rows.forEach((row, index) => {
     if (!row.classList.contains("translated")) transcriptScrollObserver.observe(row);
-    if (index < 3) enqueue(index);
+    if (index < 4) enqueue(index);
   });
+  setTimeout(() => {
+    if (generation !== translationGeneration) return;
+    rows.forEach((row, index) => {
+      if (!row.classList.contains("translated")) enqueue(index);
+    });
+  }, 250);
 }
 
 function setTranslatingSpinner(show) {
@@ -2076,9 +2391,27 @@ function setTranslatingSpinner(show) {
 // Pure helpers are exposed for the repository's Node tests. The extension does
 // not read this object at runtime.
 globalThis.__YTD_TRANSCRIPT_TESTING__ = {
+  TRANSCRIPT_MODE_STORAGE_KEY,
+  TRANSCRIPT_VIEW_STATE_STORAGE_KEY,
+  normalizeTranscriptMode,
+  persistTranscriptMode,
+  restoreTranscriptMode,
+  getTranscriptViewStateKey,
+  __setCurrentVideoForTesting: setCurrentVideoForTesting,
+  saveTranscriptViewState,
+  restoreTranscriptViewStateAfterRender,
+  chooseVideoMetadata,
+  getPlaybackState,
+  findTranscriptEntryForTime,
+  parseTranscriptEntrySeconds,
+  beginProgrammaticTranscriptScroll,
+  finishProgrammaticTranscriptScroll,
+  getTranscriptScrollGuardState,
+  onManualTranscriptNavigation,
   sendTranslationMessage,
   groupTranscriptEntries,
   splitOversizedThought,
+  ensureMissingTranscriptTranslations,
   alignTranslatedSegmentBatch,
   renderSubtitleInlineMarkup,
   renderTranscriptSegmentContent,

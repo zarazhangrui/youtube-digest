@@ -31,6 +31,26 @@ let digestButtonObserver = null;
 let digestButtonReconcileTimer = null;
 let digestButtonResizeListenerAdded = false;
 
+// --- Bilingual captions state ---
+let ytdCaptionsToggle = null;
+let ytdCaptionsOverlay = null;
+let ytdCaptionsTimeUpdateBound = false;
+let ytdCaptionsToggleTimer = null;
+let ytdCaptionsHoverHost = null;
+let captionsFontSizeBound = false;
+const ytdCaptionsState = {
+  enabled: false,
+  videoId: null,
+  videoTitle: "",
+  pages: [], // [{ id, start, duration, text }] — merged caption chunks
+  translations: [], // per-page translated string or ""
+  queue: [],
+  queued: new Set(),
+  processing: false,
+  currentIndex: -1,
+  generation: 0,
+};
+
 // ============================================================
 // INITIALIZATION
 // ============================================================
@@ -49,6 +69,8 @@ function init() {
   // Try to inject the buttons immediately
   injectDigestButton();
   tryInjectNoteButton();
+  ensureCaptionsUI();
+  restoreCaptionsPreference();
 
   // Also set up an observer to handle YouTube's dynamic content loading
   // (YouTube is an SPA, so elements appear/disappear as you navigate)
@@ -379,6 +401,7 @@ function setupButtonObserver() {
       if (!ytdNoteButton || !ytdNoteButton.isConnected) {
         tryInjectNoteButton();
       }
+      ensureCaptionsUI();
     }
   });
 
@@ -546,6 +569,9 @@ function resetNoteButtonTimer() {
 function handleNoteKeyboardShortcut(e) {
   if (!window.location.pathname.includes("/watch")) return;
   if (e.key !== "n" && e.key !== "N") return;
+
+  // Don't hijack browser/system shortcuts (e.g. Cmd+N, Ctrl+Shift+N)
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
 
   // Ignore if the user is typing in an input/textarea/contenteditable
   const active = document.activeElement;
@@ -835,9 +861,668 @@ document.addEventListener("yt-navigate-finish", () => {
   const existingToast = document.getElementById("ytd-note-toast");
   if (existingToast) existingToast.remove();
 
+  // Reset bilingual captions for the new video
+  const existingCaptionsOverlay = document.getElementById("ytd-captions-overlay");
+  if (existingCaptionsOverlay) existingCaptionsOverlay.remove();
+  const existingCaptionsToggle = document.getElementById("ytd-captions-toggle");
+  if (existingCaptionsToggle) existingCaptionsToggle.remove();
+  ytdCaptionsOverlay = null;
+  ytdCaptionsToggle = null;
+  ytdCaptionsHoverHost = null;
+  resetCaptionsState();
+
   // Re-inject buttons for the new video (with a small delay for YouTube to render)
   setTimeout(() => {
     scheduleDigestButtonReconciliation(0);
     tryInjectNoteButton();
+    ensureCaptionsUI();
+    restoreCaptionsPreference();
   }, 500);
 });
+
+// ============================================================
+// BILINGUAL CAPTIONS (self-rendered overlay subtitles)
+// ============================================================
+
+/**
+ * Self-rendered bilingual subtitles. Unlike YouTube's native captions (which
+ * require the viewer to enable CC), these show the original caption line plus
+ * a Simplified Chinese translation below it, driven by the player's playback
+ * time. The subtitle data comes from Supadata via the background's
+ * `fetchTranscript` handler, and translations reuse the background's
+ * `translateContent` transcriptBatch path — queued in small sequential batches
+ * so the provider is never flooded.
+ */
+
+function findCaptionsHost() {
+  return document.querySelector(
+    "#movie_player.html5-video-player, #movie_player, .html5-video-player",
+  );
+}
+
+const CAPTIONS_SEGMENT_LIMITS = Object.freeze({
+  minChars: 60,
+  idealChars: 180,
+  maxChars: 320,
+  maxSeconds: 20,
+});
+
+function normalizeCaptionText(text) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .replace(/([\u3400-\u9fff])\s+([\u3400-\u9fff])/g, "$1$2")
+    .replace(/([，。；：！？])\s+(?=[\u3400-\u9fff])/g, "$1")
+    .replace(/\s+([,.;:!?，。；：！？])/g, "$1")
+    .trim();
+}
+
+function splitOversizedThought(text, maxChars) {
+  const parts = [];
+  let rest = normalizeCaptionText(text);
+
+  while (rest.length > maxChars) {
+    const windowText = rest.slice(0, maxChars + 1);
+    const lowerBound = Math.floor(maxChars * 0.55);
+    let cut = -1;
+
+    for (const pattern of [/[;:；：]\s*/g, /[,，]\s*/g, /\s/g]) {
+      pattern.lastIndex = 0;
+      let match;
+      while ((match = pattern.exec(windowText))) {
+        if (match.index >= lowerBound) cut = match.index + match[0].length;
+      }
+      if (cut > 0) break;
+    }
+
+    if (cut <= 0) cut = maxChars;
+    parts.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+
+  if (rest) parts.push(rest);
+  return parts;
+}
+
+/**
+ * Semantic grouping identical to the side panel's groupTranscriptEntries, so
+ * overlay subtitles break at exactly the same points as the right-hand
+ * transcript list. Returns [{ id, start, text }] without duration; callers
+ * derive the window from the next segment's start.
+ */
+function groupCaptionsIntoPages(entries, limits = CAPTIONS_SEGMENT_LIMITS) {
+  if (!Array.isArray(entries) || entries.length === 0) return [];
+
+  const pieces = [];
+  entries.forEach((entry, entryIndex) => {
+    const text = normalizeCaptionText(entry?.text);
+    if (!text) return;
+    const start = Number.isFinite(Number(entry.start)) ? Number(entry.start) : 0;
+    const duration = Math.max(0, Number(entry.duration) || 0);
+    const sentenceParts =
+      text.match(/[^.!?;:,。！？；：，]+(?:[.!?;:,。！？；：，]+["')\]”’）】」』]*|$)/g) ||
+      [text];
+    let consumedChars = 0;
+
+    sentenceParts.forEach((sentencePart) => {
+      const cleanPart = normalizeCaptionText(sentencePart);
+      if (!cleanPart) return;
+      const oversizedParts = splitOversizedThought(cleanPart, limits.maxChars);
+      oversizedParts.forEach((part, partIndex) => {
+        const ratio = text.length ? Math.min(1, consumedChars / text.length) : 0;
+        pieces.push({
+          text: part,
+          start: start + duration * ratio,
+          semanticEnd:
+            /[.!?。！？]["')\]”’）】」』]*$/.test(part) ||
+            oversizedParts.length > 1,
+          clauseEnd: /[;:,；：，]["')\]”’）】」』]*$/.test(part),
+          sourceOrder: `${entryIndex}:${partIndex}`,
+        });
+        consumedChars += part.length + 1;
+      });
+    });
+  });
+
+  const grouped = [];
+  let current = null;
+
+  const flush = () => {
+    if (!current || !current.text.trim()) return;
+    const text = normalizeCaptionText(current.text);
+    grouped.push({
+      id: `segment-${grouped.length}-${Math.round(current.start * 1000)}`,
+      start: current.start,
+      text,
+    });
+    current = null;
+  };
+
+  pieces.forEach((piece) => {
+    if (!current) current = { start: piece.start, text: "" };
+    current.text = normalizeCaptionText(`${current.text} ${piece.text}`);
+    const elapsed = Math.max(0, piece.start - current.start);
+    const comfortablySized = current.text.length >= limits.minChars;
+    const reachedIdeal = current.text.length >= limits.idealChars;
+    const atNaturalBoundary =
+      piece.semanticEnd ||
+      (piece.clauseEnd &&
+        (reachedIdeal ||
+          current.text.length >= limits.maxChars ||
+          elapsed >= limits.maxSeconds));
+    const reachedGuardrail =
+      atNaturalBoundary &&
+      (current.text.length >= limits.maxChars || elapsed >= limits.maxSeconds);
+    const reachedHardGuardrail =
+      current.text.length >= Math.round(limits.maxChars * 1.2) ||
+      elapsed >= limits.maxSeconds + 5;
+
+    if (
+      (atNaturalBoundary && (comfortablySized || elapsed >= 8)) ||
+      (atNaturalBoundary && reachedIdeal) ||
+      reachedGuardrail ||
+      reachedHardGuardrail
+    ) {
+      flush();
+    }
+  });
+  flush();
+
+  return grouped;
+}
+
+function createCaptionsOverlay() {
+  const overlay = document.createElement("div");
+  overlay.id = "ytd-captions-overlay";
+
+  const original = document.createElement("div");
+  original.className = "ytd-captions-original";
+  original.style.cssText = `
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.4;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+  `;
+
+  const translated = document.createElement("div");
+  translated.className = "ytd-captions-translated";
+  translated.style.cssText = `
+    color: #ffd66b;
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.45;
+    margin-top: 4px;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+    display: none;
+  `;
+
+  overlay.appendChild(original);
+  overlay.appendChild(translated);
+
+  overlay.style.cssText = `
+    position: absolute;
+    left: 50%;
+    bottom: 72px;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: 88%;
+    z-index: 60;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    font-family: "Roboto", "Arial", sans-serif;
+    background: rgba(8, 8, 8, 0.55);
+    border-radius: 8px;
+    padding: 10px 18px;
+  `;
+
+  return overlay;
+}
+
+/**
+ * Scale subtitle text and the toggle's spacing with the player, matching
+ * YouTube's native captions: smaller on small screens/embeds, larger in
+ * fullscreen and big windows.
+ */
+function updateCaptionsFontSize() {
+  const player = findCaptionsHost();
+  if (!player) return;
+  const width = player.getBoundingClientRect().width;
+  if (!Number.isFinite(width) || width <= 0) return;
+
+  // Subtitle text: ~1.7% of player width, clamped to a comfortable range.
+  const originalSize = Math.max(12, Math.min(22, Math.round(width * 0.017)));
+  const translatedSize = Math.max(10, Math.round(originalSize * 0.82));
+  if (ytdCaptionsOverlay) {
+    const original = ytdCaptionsOverlay.querySelector(".ytd-captions-original");
+    const translated = ytdCaptionsOverlay.querySelector(".ytd-captions-translated");
+    if (original) original.style.fontSize = `${originalSize}px`;
+    if (translated) translated.style.fontSize = `${translatedSize}px`;
+  }
+
+  // Toggle margin-right: keep the gap proportional so small screens don't
+  // show a huge empty slot between the toggle and YouTube's CC button.
+  if (ytdCaptionsToggle) {
+    const spacing = Math.max(6, Math.min(25, Math.round(width * 0.018)));
+    ytdCaptionsToggle.style.marginRight = `${spacing}px`;
+  }
+}
+
+function bindCaptionsFontSize() {
+  if (captionsFontSizeBound) return;
+  captionsFontSizeBound = true;
+  window.addEventListener("resize", updateCaptionsFontSize);
+  document.addEventListener("fullscreenchange", updateCaptionsFontSize);
+}
+
+function createCaptionsToggle() {
+  const toggle = document.createElement("button");
+  toggle.id = "ytd-captions-toggle";
+  toggle.type = "button";
+  toggle.setAttribute("aria-label", "Toggle bilingual captions");
+  // Subtitle icon + label, sized to sit inside YouTube's control rail.
+  toggle.innerHTML = `
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+      <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+      <line x1="6" y1="12" x2="11" y2="12"></line>
+      <line x1="13" y1="12" x2="18" y2="12"></line>
+      <line x1="6" y1="16" x2="9" y2="16"></line>
+      <line x1="11" y1="16" x2="18" y2="16"></line>
+    </svg>
+    <span style="font-size: 12px; font-weight: 600; line-height: 1; margin-left: 6px; white-space: nowrap;">双语字幕</span>
+  `;
+
+  // Absolutely positioned to sit in the open area between the play button and
+  // YouTube's native right-side control rail. right: 300px clears CC, settings,
+  // PiP, and fullscreen with ~80px breathing room; bottom: 8px aligns the
+  // baseline with the rail itself, not the player frame.
+  toggle.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    height: 40px;
+    margin: 0 100px 0 0;
+    padding: 0 12px;
+    border: none;
+    border-radius: 999px;
+    z-index: 9999;
+    font-family: system-ui, -apple-system, "Roboto", sans-serif;
+    color: #ffffff;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    background: rgba(0, 0, 0, 0.5);
+    opacity: 1;
+    pointer-events: auto;
+  `;
+
+  // Mimic YouTube's control hover wash when the feature is off.
+  toggle.addEventListener("mouseenter", () => {
+    if (!ytdCaptionsState.enabled) {
+      toggle.style.background = "rgba(255, 255, 255, 0.1)";
+    }
+  });
+  toggle.addEventListener("mouseleave", () => {
+    updateCaptionsToggleStyle();
+  });
+
+  toggle.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleCaptions();
+  });
+
+  return toggle;
+}
+
+function showCaptionsToggle() {
+  if (!ytdCaptionsToggle) return;
+  ytdCaptionsToggle.style.opacity = "1";
+  ytdCaptionsToggle.style.pointerEvents = "auto";
+}
+
+function hideCaptionsToggle() {
+  if (!ytdCaptionsToggle) return;
+  ytdCaptionsToggle.style.opacity = "0";
+  ytdCaptionsToggle.style.pointerEvents = "none";
+}
+
+function resetCaptionsToggleTimer() {
+  clearTimeout(ytdCaptionsToggleTimer);
+  ytdCaptionsToggleTimer = setTimeout(hideCaptionsToggle, 2000);
+}
+
+function bindCaptionsHover(playerContainer) {
+  if (ytdCaptionsHoverHost === playerContainer) return;
+  ytdCaptionsHoverHost = playerContainer;
+
+  playerContainer.addEventListener("mouseenter", () => {
+    showCaptionsToggle();
+    resetCaptionsToggleTimer();
+  });
+  playerContainer.addEventListener("mousemove", () => {
+    showCaptionsToggle();
+    resetCaptionsToggleTimer();
+  });
+  playerContainer.addEventListener("mouseleave", () => {
+    clearTimeout(ytdCaptionsToggleTimer);
+    ytdCaptionsToggleTimer = null;
+    hideCaptionsToggle();
+  });
+}
+
+function ensureCaptionsUI() {
+  if (!window.location.pathname.includes("/watch")) return;
+  const playerContainer = findCaptionsHost();
+  if (!playerContainer) return;
+
+  // The toggle is absolutely positioned; the player must be a positioning
+  // context so right/bottom resolve against the video rather than the page.
+  if (
+    window.getComputedStyle(playerContainer).position === "static" ||
+    !playerContainer.style.position
+  ) {
+    playerContainer.style.position = "relative";
+  }
+
+  if (!ytdCaptionsOverlay || !ytdCaptionsOverlay.isConnected) {
+    ytdCaptionsOverlay = createCaptionsOverlay();
+    playerContainer.appendChild(ytdCaptionsOverlay);
+  }
+  updateCaptionsFontSize();
+  bindCaptionsFontSize();
+  if (!ytdCaptionsToggle || !ytdCaptionsToggle.isConnected) {
+    ytdCaptionsToggle = createCaptionsToggle();
+    // Insert into YouTube's native right-side control rail so the button
+    // inherits its height, hover timing, and bottom alignment. A 60px
+    // margin-right (set in createCaptionsToggle) keeps clear of CC.
+    const rightControls = playerContainer.querySelector(".ytp-right-controls");
+    if (rightControls) {
+      rightControls.insertBefore(ytdCaptionsToggle, rightControls.firstChild);
+    } else {
+      playerContainer.appendChild(ytdCaptionsToggle);
+    }
+    updateCaptionsToggleStyle();
+  }
+}
+
+function updateCaptionsToggleStyle() {
+  if (!ytdCaptionsToggle) return;
+  ytdCaptionsToggle.style.background = ytdCaptionsState.enabled
+    ? "rgba(200, 103, 79, 0.9)"
+    : "rgba(0, 0, 0, 0.5)";
+}
+
+async function restoreCaptionsPreference() {
+  if (!window.location.pathname.includes("/watch")) return;
+  try {
+    const response = await chrome.runtime.sendMessage({
+      action: "getCaptionsPref",
+    });
+    const enabled = !!response?.enabled;
+    ytdCaptionsState.enabled = enabled;
+    updateCaptionsToggleStyle();
+    // loadBilingualCaptions is idempotent per video, so an already-loaded
+    // video just re-reveals and tops up translations.
+    if (enabled) await loadBilingualCaptions();
+  } catch (_error) {
+    // Preference read failed; keep captions off.
+  }
+}
+
+async function toggleCaptions() {
+  const next = !ytdCaptionsState.enabled;
+  ytdCaptionsState.enabled = next;
+  updateCaptionsToggleStyle();
+  try {
+    await chrome.runtime.sendMessage({ action: "setCaptionsPref", enabled: next });
+  } catch (_error) {
+    // Persisting the preference is best-effort; the current view still works.
+  }
+
+  if (next) {
+    await loadBilingualCaptions();
+  } else {
+    hideCaptionsOverlay();
+    ytdCaptionsState.generation += 1;
+    ytdCaptionsState.queue = [];
+    ytdCaptionsState.queued.clear();
+  }
+}
+
+async function loadBilingualCaptions() {
+  const videoId = new URLSearchParams(window.location.search).get("v");
+  if (!videoId) return;
+
+  // Same video already loaded — just reveal and top up translations.
+  if (ytdCaptionsState.videoId === videoId && ytdCaptionsState.pages.length) {
+    showCaptionsOverlay();
+    enqueueCaptionsTranslations(
+      ytdCaptionsState.currentIndex >= 0 ? ytdCaptionsState.currentIndex : 0,
+    );
+    return;
+  }
+
+  ytdCaptionsState.generation += 1;
+  const generation = ytdCaptionsState.generation;
+  ytdCaptionsState.videoId = videoId;
+  ytdCaptionsState.videoTitle = extractVideoInfo().title;
+  ytdCaptionsState.pages = [];
+  ytdCaptionsState.translations = [];
+  ytdCaptionsState.queue = [];
+  ytdCaptionsState.queued.clear();
+  ytdCaptionsState.currentIndex = -1;
+
+  showCaptionsLoading();
+
+  try {
+    const result = await chrome.runtime.sendMessage({
+      action: "fetchTranscript",
+      videoId,
+    });
+    if (generation !== ytdCaptionsState.generation) return;
+
+    if (result?.success && Array.isArray(result.transcript)) {
+      const cleanChunks = result.transcript
+        .filter((chunk) => chunk && typeof chunk.text === "string" && chunk.text.trim())
+        .map((chunk) => ({
+          start: Math.max(0, Math.floor(Number(chunk.start) || 0)),
+          duration: Math.max(0.5, Math.floor(Number(chunk.duration) || 0)),
+          text: chunk.text.replace(/>> ?/g, "").trim(),
+        }));
+      const grouped = groupCaptionsIntoPages(cleanChunks);
+      ytdCaptionsState.pages = grouped.map((segment, index) => ({
+        id: segment.id,
+        start: segment.start,
+        duration: Math.max(
+          1,
+          (grouped[index + 1]?.start ?? segment.start + 5) - segment.start,
+        ),
+        text: segment.text,
+      }));
+      ytdCaptionsState.translations = new Array(
+        ytdCaptionsState.pages.length,
+      ).fill("");
+      bindCaptionsTimeUpdate();
+      showCaptionsOverlay();
+      handleCaptionsTimeUpdate();
+    } else {
+      showCaptionsError(result?.message || "No subtitles available for this video.");
+    }
+  } catch (_error) {
+    if (generation === ytdCaptionsState.generation) {
+      showCaptionsError("Could not load subtitles. Please try again.");
+    }
+  }
+}
+
+function bindCaptionsTimeUpdate() {
+  if (ytdCaptionsTimeUpdateBound) return;
+  ytdCaptionsTimeUpdateBound = true;
+  // timeupdate does not bubble; capture at the document so the listener
+  // survives YouTube swapping the <video> element during SPA navigation.
+  document.addEventListener("timeupdate", handleCaptionsTimeUpdate, true);
+}
+
+function handleCaptionsTimeUpdate() {
+  if (!ytdCaptionsState.enabled || !ytdCaptionsState.pages.length) return;
+  const video = document.querySelector("video.html5-main-video");
+  if (!video) return;
+  const currentTime = video.currentTime;
+
+  let index = -1;
+  for (let i = 0; i < ytdCaptionsState.pages.length; i++) {
+    const chunk = ytdCaptionsState.pages[i];
+    if (currentTime >= chunk.start && currentTime < chunk.start + chunk.duration) {
+      index = i;
+      break;
+    }
+  }
+  if (index === -1) {
+    for (let i = ytdCaptionsState.pages.length - 1; i >= 0; i--) {
+      if (ytdCaptionsState.pages[i].start <= currentTime) {
+        index = i;
+        break;
+      }
+    }
+  }
+
+  const changed = index !== ytdCaptionsState.currentIndex;
+  ytdCaptionsState.currentIndex = index;
+  updateCaptionsDisplay();
+  if (changed && index >= 0) enqueueCaptionsTranslations(index);
+}
+
+function updateCaptionsDisplay() {
+  if (!ytdCaptionsOverlay || !ytdCaptionsState.enabled) return;
+  const original = ytdCaptionsOverlay.querySelector(".ytd-captions-original");
+  const translated = ytdCaptionsOverlay.querySelector(".ytd-captions-translated");
+  if (!original || !translated) return;
+
+  const index = ytdCaptionsState.currentIndex;
+  if (index < 0 || index >= ytdCaptionsState.pages.length) {
+    ytdCaptionsOverlay.style.opacity = "0";
+    return;
+  }
+
+  original.textContent = ytdCaptionsState.pages[index].text;
+  const translatedText = ytdCaptionsState.translations[index];
+  if (translatedText) {
+    translated.textContent = translatedText;
+    translated.style.display = "block";
+  } else {
+    translated.textContent = "";
+    translated.style.display = "none";
+  }
+  ytdCaptionsOverlay.style.opacity = "1";
+}
+
+function showCaptionsOverlay() {
+  if (ytdCaptionsOverlay) ytdCaptionsOverlay.style.opacity = "1";
+}
+
+function hideCaptionsOverlay() {
+  if (ytdCaptionsOverlay) ytdCaptionsOverlay.style.opacity = "0";
+}
+
+function showCaptionsLoading() {
+  if (!ytdCaptionsOverlay) return;
+  const original = ytdCaptionsOverlay.querySelector(".ytd-captions-original");
+  const translated = ytdCaptionsOverlay.querySelector(".ytd-captions-translated");
+  if (original) original.textContent = "Loading subtitles…";
+  if (translated) translated.style.display = "none";
+  ytdCaptionsOverlay.style.opacity = "1";
+}
+
+function showCaptionsError(message) {
+  if (!ytdCaptionsOverlay) return;
+  const original = ytdCaptionsOverlay.querySelector(".ytd-captions-original");
+  const translated = ytdCaptionsOverlay.querySelector(".ytd-captions-translated");
+  if (original) original.textContent = message;
+  if (translated) translated.style.display = "none";
+  ytdCaptionsOverlay.style.opacity = "1";
+}
+
+function enqueueCaptionsTranslations(aroundIndex) {
+  if (!ytdCaptionsState.pages.length) return;
+  const windowSize = 12;
+  const start = Math.max(0, aroundIndex);
+  const end = Math.min(ytdCaptionsState.pages.length, aroundIndex + windowSize);
+  for (let i = start; i < end; i++) enqueueCaptionsIndex(i);
+  processCaptionsQueue();
+}
+
+function enqueueCaptionsIndex(index) {
+  if (
+    !Number.isInteger(index) ||
+    index < 0 ||
+    index >= ytdCaptionsState.pages.length
+  ) {
+    return;
+  }
+  if (ytdCaptionsState.translations[index]) return;
+  if (ytdCaptionsState.queued.has(index)) return;
+  ytdCaptionsState.queue.push(index);
+  ytdCaptionsState.queued.add(index);
+}
+
+async function processCaptionsQueue() {
+  if (ytdCaptionsState.processing || ytdCaptionsState.queue.length === 0) return;
+  ytdCaptionsState.processing = true;
+  const generation = ytdCaptionsState.generation;
+  try {
+    while (ytdCaptionsState.queue.length && generation === ytdCaptionsState.generation) {
+      const batch = ytdCaptionsState.queue.splice(0, 4);
+      batch.forEach((index) => ytdCaptionsState.queued.delete(index));
+
+      const segments = batch.map((index) => ({
+        id: ytdCaptionsState.pages[index].id,
+        text: ytdCaptionsState.pages[index].text,
+      }));
+
+      try {
+        const result = await chrome.runtime.sendMessage({
+          action: "translateContent",
+          content: { segments },
+          contentType: "transcriptBatch",
+          targetLanguage: "zh",
+          videoTitle: ytdCaptionsState.videoTitle || "",
+        });
+        if (generation !== ytdCaptionsState.generation) break;
+
+        if (result?.success) {
+          const byId = new Map(
+            (result.translatedContent?.segments || []).map((s) => [s.id, s.text]),
+          );
+          batch.forEach((index, batchIndex) => {
+            const text = byId.get(segments[batchIndex].id);
+            if (text) ytdCaptionsState.translations[index] = text;
+          });
+        }
+      } catch (_error) {
+        // Leave this batch untranslated and show the original text only.
+      }
+
+      if (generation !== ytdCaptionsState.generation) break;
+      updateCaptionsDisplay();
+    }
+  } finally {
+    ytdCaptionsState.processing = false;
+    if (ytdCaptionsState.queue.length && generation === ytdCaptionsState.generation) {
+      processCaptionsQueue();
+    }
+  }
+}
+
+function resetCaptionsState() {
+  ytdCaptionsState.generation += 1;
+  ytdCaptionsState.videoId = null;
+  ytdCaptionsState.videoTitle = "";
+  ytdCaptionsState.pages = [];
+  ytdCaptionsState.translations = [];
+  ytdCaptionsState.queue = [];
+  ytdCaptionsState.queued.clear();
+  ytdCaptionsState.currentIndex = -1;
+  clearTimeout(ytdCaptionsToggleTimer);
+  ytdCaptionsToggleTimer = null;
+  hideCaptionsOverlay();
+}

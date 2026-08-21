@@ -17,6 +17,7 @@ skills-lock.json
 .playwright-mcp/
 node_modules/
 dist/
+.workbuddy/
 
 # Environment
 .env
