@@ -37,7 +37,15 @@ test("all timestamped transcript row clicks use the selection-aware seek helper"
   );
 });
 
-test("the Explain tooltip preserves selection and contains pointer events", () => {
+test("the Explain tooltip preserves selection, cleanup, and pointer events", () => {
+  assert.match(
+    source,
+    /if \(selectionFeatureCleanup\) \{[\s\S]*?selectionFeatureCleanup\(\);[\s\S]*?selectionFeatureCleanup = null;/,
+  );
+  assert.match(
+    source,
+    /selectionFeatureCleanup = \(\) => \{[\s\S]*?document\.removeEventListener\("mouseup", handleSelectionMouseup\);[\s\S]*?document\.removeEventListener\("mousedown", handleDocumentMousedown\);[\s\S]*?tooltip\.remove\(\);/,
+  );
   assert.match(
     source,
     /tooltip\.addEventListener\("mousedown", \(event\) => \{\s+event\.preventDefault\(\);\s+event\.stopPropagation\(\);/,

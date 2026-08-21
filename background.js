@@ -1547,8 +1547,8 @@ function normalizeTranslatedSegmentBatch(parsed, sourceSegments) {
 
 /**
  * Translates content using DeepSeek.
- * @param {Object} content - JSON object containing semantic transcript segments
- * @param {string} contentType - Must be 'transcriptBatch'
+ * @param {Object|string} content - Transcript segments or selected text
+ * @param {string} contentType - 'transcriptBatch' or 'selectedText'
  * @param {string} targetLanguage - 'zh' for Simplified Chinese
  * @param {string} videoTitle - The video title (for context)
  * @returns {Object} - { success, translatedContent } or { success: false, error }
@@ -1566,7 +1566,7 @@ async function handleTranslateContent(
         error: `Unsupported translation target: ${String(targetLanguage)}`,
       };
     }
-    if (contentType !== "transcriptBatch") {
+    if (!["transcriptBatch", "selectedText"].includes(contentType)) {
       return {
         success: false,
         error: `Unsupported translation content type: ${String(contentType)}`,
@@ -1576,6 +1576,39 @@ async function handleTranslateContent(
     const settings = await getSettings();
     if (!settings.aiApiKey) {
       return { success: false, error: "DeepSeek API key not configured" };
+    }
+
+    if (contentType === "selectedText") {
+      const selectedText = String(content?.text ?? content ?? "").trim();
+      if (!selectedText) {
+        return { success: false, error: "Selected text is empty" };
+      }
+      if (selectedText.length > 4000) {
+        return { success: false, error: "Selected text is too long" };
+      }
+
+      const langName = "Simplified Chinese";
+      const baseRules = await getTranslationBaseRules(targetLanguage);
+      const systemPrompt = await loadPromptSection(
+        "translation.md",
+        "Selected text translation",
+        {
+          langName,
+          videoTitle: videoTitle || "Unknown",
+          baseRules,
+        },
+      );
+      const result = await callAiTranslation(systemPrompt, selectedText, {
+        temperature: 0.2,
+        maxTokens: 1024,
+      });
+      if (!result.success) return result;
+
+      const text = result.text.trim();
+      if (!text) {
+        return { success: false, error: "Translation returned empty text" };
+      }
+      return { success: true, translatedContent: { text } };
     }
 
     const sourceSegments = validateTranscriptBatchRequest(content);

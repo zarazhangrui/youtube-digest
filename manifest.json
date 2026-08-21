@@ -33,6 +33,12 @@
       "matches": ["https://www.youtube.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "exclude_matches": ["https://www.youtube.com/*"],
+      "js": ["page-translate.js"],
+      "run_at": "document_idle"
     }
   ],
   "icons": {

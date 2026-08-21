@@ -29,6 +29,7 @@ public_allowlist=(
   "background.js"
   "settings.js"
   "content.js"
+  "page-translate.js"
   "sidepanel.html"
   "sidepanel.css"
   "sidepanel.js"

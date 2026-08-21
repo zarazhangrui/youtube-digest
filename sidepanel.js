@@ -42,6 +42,7 @@ let transcriptScrollObserver = null;
 // Stable keys include the video, source mode, language, and semantic segment ID.
 let transcriptParagraphCache = new Map();
 const TRANSLATION_MESSAGE_TIMEOUT_MS = 130_000;
+let selectionFeatureCleanup = null;
 
 /**
  * Prevent a stopped service worker or dead message channel from leaving the
@@ -1232,6 +1233,11 @@ function setupExplainFeature() {
   const transcriptList = document.getElementById("transcriptList");
   if (!transcriptList) return;
 
+  if (selectionFeatureCleanup) {
+    selectionFeatureCleanup();
+    selectionFeatureCleanup = null;
+  }
+
   // Remove existing tooltip if any
   const existingTooltip = document.getElementById("explainTooltip");
   if (existingTooltip) existingTooltip.remove();
@@ -1240,7 +1246,7 @@ function setupExplainFeature() {
   const tooltip = document.createElement("div");
   tooltip.id = "explainTooltip";
   tooltip.className = "explain-tooltip";
-  tooltip.innerHTML = `<button class="explain-btn">💡 Explain</button>`;
+  tooltip.innerHTML = `<button class="explain-btn">Explain</button>`;
   tooltip.style.display = "none";
   document.body.appendChild(tooltip);
 
@@ -1260,7 +1266,7 @@ function setupExplainFeature() {
   });
 
   // Listen for text selection
-  document.addEventListener("mouseup", (e) => {
+  const handleSelectionMouseup = () => {
     const selection = window.getSelection();
     const text = selection.toString().trim();
 
@@ -1281,14 +1287,16 @@ function setupExplainFeature() {
     } else {
       tooltip.style.display = "none";
     }
-  });
+  };
+  document.addEventListener("mouseup", handleSelectionMouseup);
 
   // Hide tooltip when clicking elsewhere
-  document.addEventListener("mousedown", (e) => {
+  const handleDocumentMousedown = (e) => {
     if (!tooltip.contains(e.target)) {
       tooltip.style.display = "none";
     }
-  });
+  };
+  document.addEventListener("mousedown", handleDocumentMousedown);
 
   // Handle explain button click
   tooltip
@@ -1301,6 +1309,12 @@ function setupExplainFeature() {
       tooltip.style.display = "none";
       await showExplanation(selectedText);
     });
+
+  selectionFeatureCleanup = () => {
+    document.removeEventListener("mouseup", handleSelectionMouseup);
+    document.removeEventListener("mousedown", handleDocumentMousedown);
+    tooltip.remove();
+  };
 }
 
 /**

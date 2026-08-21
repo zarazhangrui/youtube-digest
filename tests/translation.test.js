@@ -828,6 +828,38 @@ test("DeepSeek retries one empty transcript JSON response without response_forma
   assert.equal(requests[0].max_tokens, 1536);
 });
 
+test("selected text translation uses the plain text prompt path", async () => {
+  const requests = [];
+  const helpers = loadBackgroundHelpers({
+    fetchImpl: async (url, options) => {
+      if (url.startsWith("chrome-extension://")) {
+        return { ok: true, text: async () => read("prompts/translation.md") };
+      }
+      requests.push(JSON.parse(options.body));
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: "这是一段中文翻译。" } }],
+        }),
+      };
+    },
+  });
+
+  const result = await helpers.handleTranslateContent(
+    { text: "This is selected text." },
+    "selectedText",
+    "zh",
+    "Video",
+  );
+
+  assert.equal(result.success, true);
+  assert.equal(result.translatedContent.text, "这是一段中文翻译。");
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].messages[0].content, /selected transcript text/);
+  assert.equal(requests[0].messages[1].content, "This is selected text.");
+  assert.equal(Object.hasOwn(requests[0], "response_format"), false);
+});
+
 test("translation message watchdog rejects, clears its timer, and ignores late replies", async () => {
   let timeoutCallback;
   let timeoutDelay;
