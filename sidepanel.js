@@ -26,6 +26,9 @@ let currentChannelName = "";
 let currentVideoDescription = "";
 let currentVideoDuration = 0;
 let isAnalysisLoading = false; // Track if analysis is in progress
+// Bump whenever the shape of the Overview analysis changes. Cached analyses
+// from an older shape are discarded and regenerated; transcripts are kept.
+const ANALYSIS_SCHEMA_VERSION = 2;
 let youtubeTabId = null; // Store the YouTube tab ID for reliable messaging
 let errorAction = null;
 
@@ -834,6 +837,20 @@ async function translateInterfaceSegments(surface, segments, rerender) {
 function getOverviewTranslationSegments() {
   if (!currentAnalysis) return [];
   const segments = [];
+  // Executive summary first, so it translates before chapters and quotes.
+  const execSummary = currentAnalysis.execSummary || {};
+  if (execSummary.oneLine) {
+    segments.push({ id: "exec-oneline", text: execSummary.oneLine });
+  }
+  (execSummary.framework || []).forEach((item, index) => {
+    if (item) segments.push({ id: `exec-framework-${index}`, text: item });
+  });
+  (execSummary.takeaway || []).forEach((item, index) => {
+    if (item) segments.push({ id: `exec-takeaway-${index}`, text: item });
+  });
+  if (execSummary.verdict) {
+    segments.push({ id: "exec-verdict", text: execSummary.verdict });
+  }
   (currentAnalysis.chapters || []).forEach((chapter, index) => {
     if (chapter.title) {
       segments.push({ id: `chapter-${index}-title`, text: chapter.title });
@@ -884,10 +901,62 @@ function translateNotesContent() {
 }
 
 /**
+ * Renders the executive summary card. Missing parts are skipped; if every
+ * part is empty the whole section stays hidden.
+ */
+function renderExecSummary(execSummary) {
+  const section = document.getElementById("execSummarySection");
+  const card = document.getElementById("execSummaryCard");
+  if (!section || !card) return;
+  const data = execSummary || {};
+  const framework = Array.isArray(data.framework) ? data.framework : [];
+  const takeaway = Array.isArray(data.takeaway) ? data.takeaway : [];
+  if (
+    !data.oneLine &&
+    !framework.length &&
+    !takeaway.length &&
+    !data.verdict
+  ) {
+    section.hidden = true;
+    card.innerHTML = "";
+    return;
+  }
+  section.hidden = false;
+  const block = (label, items, tag, idPrefix) =>
+    `<div class="exec-block"><span class="exec-label">${label}</span><${tag} class="exec-list">${items
+      .map(
+        (item, index) =>
+          `<li>${renderLocalizedContent(item, "overview", `${idPrefix}-${index}`)}</li>`,
+      )
+      .join("")}</${tag}></div>`;
+
+  const parts = [];
+  if (data.oneLine) {
+    parts.push(
+      `<p class="exec-oneline">${renderLocalizedContent(data.oneLine, "overview", "exec-oneline")}</p>`,
+    );
+  }
+  if (framework.length) {
+    parts.push(block("What it argues", framework, "ol", "exec-framework"));
+  }
+  if (takeaway.length) {
+    parts.push(block("What you get", takeaway, "ul", "exec-takeaway"));
+  }
+  if (data.verdict) {
+    parts.push(
+      `<p class="exec-verdict">${renderLocalizedContent(data.verdict, "overview", "exec-verdict")}</p>`,
+    );
+  }
+  card.innerHTML = parts.join("");
+}
+
+/**
  * Renders the analysis results into the Overview tab.
- * Shows chapters and key quotes only.
+ * Shows the executive summary, chapters and key quotes.
  */
 function renderAnalysisResults(analysis) {
+  renderExecSummary(analysis.execSummary);
+
   // Chapters
   const chapterList = document.getElementById("chapterList");
   chapterList.innerHTML = "";
@@ -1966,6 +2035,7 @@ async function saveToCache(videoId) {
     }
 
     const cacheData = {
+      analysisSchema: ANALYSIS_SCHEMA_VERSION,
       analysis: currentAnalysis, // May be null if not yet analyzed
       transcript: currentTranscript,
       transcriptText: currentTranscriptText,
@@ -2052,6 +2122,13 @@ async function loadFromCache(videoId) {
     if (Date.now() - cached.timestamp > THIRTY_DAYS) {
       await chrome.storage.local.remove(`digest_${videoId}`);
       return null;
+    }
+
+    // An analysis cached under an older Overview shape would render without
+    // the newer sections, so drop it and let Overview regenerate. The
+    // transcript and translations stay cached (the transcript cost a credit).
+    if (cached.analysis && cached.analysisSchema !== ANALYSIS_SCHEMA_VERSION) {
+      cached.analysis = null;
     }
 
     return cached;
@@ -2892,6 +2969,8 @@ function setTranslatingSpinner(show) {
 // Pure helpers are exposed for the repository's Node tests. The extension does
 // not read this object at runtime.
 globalThis.__YTD_TRANSCRIPT_TESTING__ = {
+  ANALYSIS_SCHEMA_VERSION,
+  loadFromCache,
   sendTranslationMessage,
   groupTranscriptEntries,
   splitOversizedThought,

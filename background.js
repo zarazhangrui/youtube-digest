@@ -1090,7 +1090,25 @@ function validateAndFixTimestamps(analysis, maxSeconds) {
     .filter((seconds) => seconds !== null)
     .slice(0, 100);
 
-  return { chapters, keyQuotes, keyMoments };
+  // Executive summary: rebuilt from an allowlist like every other field, so
+  // anything extra the model returns is dropped.
+  const safeList = (value, maxItems, maxLength) =>
+    (Array.isArray(value) ? value : [])
+      .map((item) => safeString(item, maxLength))
+      .filter(Boolean)
+      .slice(0, maxItems);
+  const rawSummary =
+    analysis?.execSummary && typeof analysis.execSummary === "object"
+      ? analysis.execSummary
+      : {};
+  const execSummary = {
+    oneLine: safeString(rawSummary.oneLine, 300),
+    framework: safeList(rawSummary.framework, 4, 200),
+    takeaway: safeList(rawSummary.takeaway, 3, 200),
+    verdict: safeString(rawSummary.verdict, 200),
+  };
+
+  return { execSummary, chapters, keyQuotes, keyMoments };
 }
 
 // ============================================================
@@ -1717,6 +1735,7 @@ async function callAiTranslation(
 // Pure validators are exposed for the repository's Node tests only.
 globalThis.__YTD_TRANSLATION_TESTING__ = {
   requestAiCompletion,
+  validateAndFixTimestamps,
   callAiTranslation,
   validateTranscriptBatchRequest,
   normalizeTranslatedSegmentBatch,

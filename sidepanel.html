@@ -182,8 +182,14 @@
           </div>
         </div>
 
-        <!-- TAB: Overview (chapters + key quotes) - requires LLM -->
+        <!-- TAB: Overview (executive summary + chapters + key quotes) - requires LLM -->
         <div class="tab-panel" data-panel="overview">
+          <!-- Executive summary (hidden until an analysis provides one) -->
+          <div class="section" id="execSummarySection" hidden>
+            <div class="section-title">Executive Summary</div>
+            <div class="exec-card" id="execSummaryCard"></div>
+          </div>
+
           <!-- Chapters -->
           <div class="section">
             <div class="section-title">Chapters</div>
