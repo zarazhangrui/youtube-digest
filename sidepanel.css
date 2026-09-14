@@ -1499,3 +1499,63 @@ body {
   color: var(--accent);
   background: var(--accent-dim);
 }
+
+/* ============================================================
+   EXECUTIVE SUMMARY
+   ============================================================ */
+.exec-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  padding: 14px 16px;
+}
+
+.exec-oneline {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1.45;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.exec-block {
+  margin-top: 12px;
+}
+
+.exec-label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.exec-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.exec-list li {
+  margin-bottom: 4px;
+}
+
+.exec-list li::marker {
+  color: var(--accent);
+}
+
+.exec-verdict {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-heavy);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--sage);
+  font-weight: 600;
+}
