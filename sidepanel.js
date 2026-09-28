@@ -21,6 +21,7 @@ let currentTranscript = null;
 let currentTranscriptText = null; // Plain text (for display/export)
 let currentTranscriptTimestamped = null; // With timestamps for AI analysis
 let currentTranscriptLanguage = null;
+let currentTranscriptSource = null;
 let currentVideoTitle = "";
 let currentChannelName = "";
 let currentVideoDescription = "";
@@ -28,6 +29,8 @@ let currentVideoDuration = 0;
 let isAnalysisLoading = false; // Track if analysis is in progress
 let youtubeTabId = null; // Store the YouTube tab ID for reliable messaging
 let errorAction = null;
+let digestGeneration = 0;
+let tabCheckGeneration = 0;
 
 // --- Translation state ---
 // The universal language control supports original content, Chinese, and an
@@ -257,15 +260,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupEventListeners();
   await evictOldCacheEntries(20);
 
-  const configStatus = await chrome.runtime.sendMessage({
-    action: "checkConfig",
-  });
-
-  if (!configStatus.hasSupadataKey || !configStatus.hasAiKey) {
-    showConfigError(configStatus);
-    return;
-  }
-
   await checkCurrentTab();
 });
 
@@ -277,6 +271,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // (This used to force-clear the cache on every click, which silently
     // burned a transcript credit + analysis tokens per click.)
     checkCurrentTab();
+    sendResponse({ success: true });
+  }
+  if (message.action === "videoPageChanged" && sender.tab?.id === youtubeTabId) {
+    handleFrontTabUrl(sender.tab.url);
     sendResponse({ success: true });
   }
   if (message.action === "transcriptProgress") {
@@ -339,15 +337,18 @@ function panelIsShowingResults() {
  * refresh the digest when the video changed.
  */
 function handleFrontTabUrl(url) {
-  if (!(url || "").startsWith("https://www.youtube.com")) {
+  if (!DIGEST_VIDEO.supports(url)) {
     // Start the position save, then close in this same event callback. Chrome
     // does not reliably honor window.close() after an asynchronous wait.
+    digestGeneration += 1;
+    tabCheckGeneration += 1;
     void saveCurrentTranscriptViewState();
     window.close();
     return;
   }
 
   const newVideoId = extractVideoId(url);
+  if (newVideoId !== currentVideoId) { digestGeneration += 1; tabCheckGeneration += 1; }
   // Refresh when the video changed, or when we're not currently showing
   // results (e.g. user went home, then clicked back into the same video).
   if (newVideoId !== currentVideoId || !panelIsShowingResults()) {
@@ -405,9 +406,7 @@ function setupEventListeners() {
       errorAction();
       return;
     }
-    if (currentVideoId) {
-      startDigest(currentVideoId, currentVideoUrl);
-    }
+    checkCurrentTab();
   });
 
   document.getElementById("settingsBtn")?.addEventListener("click", () => {
@@ -473,6 +472,7 @@ function setNotesFilter(showAll) {
 // ============================================================
 
 async function checkCurrentTab() {
+  const checkGeneration = ++tabCheckGeneration;
   try {
     // The panel belongs only to the active tab. Looking for another open
     // YouTube tab here can keep an old transcript visible on a non-YouTube
@@ -481,6 +481,7 @@ async function checkCurrentTab() {
       active: true,
       lastFocusedWindow: true,
     });
+    if (checkGeneration !== tabCheckGeneration) return;
     const tab = tabs[0] || null;
 
     debugLog("[YouTube Digest Panel] Found tab:", tab?.id, tab?.url);
@@ -490,7 +491,7 @@ async function checkCurrentTab() {
       return;
     }
 
-    if (!tab.url.startsWith("https://www.youtube.com")) {
+    if (!DIGEST_VIDEO.supports(tab.url)) {
       handleFrontTabUrl(tab.url);
       return;
     }
@@ -502,14 +503,21 @@ async function checkCurrentTab() {
 
     if (videoId) {
       currentVideoUrl = tab.url;
+      currentVideoTitle = "";
+      currentChannelName = "";
+      currentVideoDescription = "";
+      currentVideoDuration = 0;
 
       try {
         // Route through background script for reliable message passing
         const result = await chrome.runtime.sendMessage({
           action: "relayToContent",
+          tabId: youtubeTabId,
           payload: { action: "getVideoInfo" },
+          videoId,
         });
         debugLog("[YouTube Digest Panel] getVideoInfo result:", result);
+        if (checkGeneration !== tabCheckGeneration) return;
         if (result.success && result.response) {
           currentVideoTitle = result.response.title || "";
           currentChannelName = result.response.channelName || "";
@@ -517,6 +525,7 @@ async function checkCurrentTab() {
           currentVideoDuration = result.response.duration || 0;
         }
       } catch (e) {
+        if (checkGeneration !== tabCheckGeneration) return;
         console.error("[YouTube Digest Panel] getVideoInfo error:", e);
         currentVideoTitle = "";
         currentChannelName = "";
@@ -524,7 +533,8 @@ async function checkCurrentTab() {
         currentVideoDuration = 0;
       }
 
-      startDigest(videoId, tab.url);
+      if (checkGeneration !== tabCheckGeneration) return;
+      await startDigest(videoId, tab.url);
     } else {
       showState("welcome");
     }
@@ -535,28 +545,7 @@ async function checkCurrentTab() {
 }
 
 function extractVideoId(url) {
-  try {
-    const urlObj = new URL(url);
-
-    if (
-      urlObj.hostname.includes("youtube.com") &&
-      urlObj.searchParams.has("v")
-    ) {
-      return urlObj.searchParams.get("v");
-    }
-
-    if (urlObj.hostname === "youtu.be") {
-      return urlObj.pathname.slice(1);
-    }
-
-    if (urlObj.pathname.startsWith("/embed/")) {
-      return urlObj.pathname.split("/")[2];
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
+  return DIGEST_VIDEO.parse(url)?.id || null;
 }
 
 // ============================================================
@@ -564,6 +553,7 @@ function extractVideoId(url) {
 // ============================================================
 
 async function startDigest(videoId, videoUrl) {
+  const generation = ++digestGeneration;
   // Check if we already have this video loaded in memory
   if (videoId === currentVideoId && currentAnalysis) {
     showState("results");
@@ -579,10 +569,14 @@ async function startDigest(videoId, videoUrl) {
     transcriptScrollObserver = null;
     resetTranscriptSearch();
     lastTranscriptScrollTop = 0;
-    pendingTranscriptViewState = await loadTranscriptViewState(videoId);
+    const nextViewState = await loadTranscriptViewState(videoId);
+    if (generation !== digestGeneration) return;
     // An unseen video always starts in Original, so opening it never spends
     // translation tokens. A saved choice is restored only for this video.
-    currentTranscriptMode = await loadDisplayLanguageMode(videoId);
+    const nextDisplayMode = await loadDisplayLanguageMode(videoId);
+    if (generation !== digestGeneration) return;
+    pendingTranscriptViewState = nextViewState;
+    currentTranscriptMode = nextDisplayMode;
     document
       .getElementById("contentArea")
       ?.classList.toggle(
@@ -593,6 +587,7 @@ async function startDigest(videoId, videoUrl) {
 
   // Check cache for this video
   const cached = await loadFromCache(videoId);
+  if (generation !== digestGeneration) return;
   if (cached) {
     debugLog("Loading from cache:", videoId);
     currentVideoId = videoId;
@@ -602,6 +597,7 @@ async function startDigest(videoId, videoUrl) {
     currentTranscriptText = cached.transcriptText;
     currentTranscriptTimestamped = cached.transcriptTimestamped;
     currentTranscriptLanguage = cached.transcriptLanguage || null;
+    currentTranscriptSource = cached.source || null;
     isAnalysisLoading = false;
 
     // Restore semantic-segment translations from persistent storage.
@@ -652,6 +648,7 @@ async function startDigest(videoId, videoUrl) {
   currentTranscriptText = null;
   currentTranscriptTimestamped = null;
   currentTranscriptLanguage = null;
+  currentTranscriptSource = null;
   isAnalysisLoading = false;
 
   if (currentVideoTitle || currentChannelName) {
@@ -666,9 +663,11 @@ async function startDigest(videoId, videoUrl) {
 
   const transcriptResult = await chrome.runtime.sendMessage({
     action: "fetchTranscript",
+    tabId: youtubeTabId,
     videoId: videoId,
   });
 
+  if (generation !== digestGeneration) return;
   if (!transcriptResult.success) {
     if (transcriptResult.error === "NO_SUPADATA_KEY") {
       showError(
@@ -684,6 +683,20 @@ async function startDigest(videoId, videoUrl) {
     return;
   }
 
+  if (transcriptResult.info) {
+    currentVideoTitle = transcriptResult.info.title || currentVideoTitle;
+    currentChannelName = transcriptResult.info.channelName || currentChannelName;
+    currentVideoDuration = transcriptResult.info.duration || currentVideoDuration;
+    currentVideoDescription = transcriptResult.info.description || currentVideoDescription;
+    document.getElementById("videoTitle").textContent = currentVideoTitle;
+    document.getElementById("videoChannel").textContent = currentChannelName;
+    document.getElementById("videoInfo").style.display = "block";
+  }
+  if (!DIGEST_VIDEO.validTranscriptSource(videoId, transcriptResult.source)) {
+    showError("字幕来源校验失败", "字幕与当前视频不匹配，已停止显示，请重试。");
+    return;
+  }
+  currentTranscriptSource = transcriptResult.source || null;
   currentTranscript = transcriptResult.transcript;
   currentTranscriptText = transcriptResult.transcriptText;
   currentTranscriptTimestamped = transcriptResult.transcriptTextTimestamped;
@@ -1351,7 +1364,7 @@ function copyTranscript() {
 
 function exportTranscript() {
   const transcriptContent = getDisplayedTranscriptText();
-  const videoUrl = `https://youtube.com/watch?v=${currentVideoId}`;
+  const videoUrl = DIGEST_VIDEO.url(currentVideoId);
 
   let exportText = "";
   exportText += `TRANSCRIPT\n`;
@@ -1508,6 +1521,8 @@ async function triggerAnalysis() {
     return;
 
   isAnalysisLoading = true;
+  const analysisVideoId = currentVideoId;
+  const analysisGeneration = digestGeneration;
 
   // Show loading indicators in the Overview tab
   const chapterList = document.getElementById("chapterList");
@@ -1530,6 +1545,7 @@ async function triggerAnalysis() {
       videoDuration: currentVideoDuration,
     });
 
+    if (analysisVideoId !== currentVideoId || analysisGeneration !== digestGeneration) return;
     if (!analysisResult.success) {
       if (chapterList)
         chapterList.innerHTML = `<li class="chapter-item" style="color: var(--accent); border: none;">Analysis failed: ${escapeHtml(analysisResult.error || "Unknown error")}</li>`;
@@ -1544,6 +1560,7 @@ async function triggerAnalysis() {
     // Save to cache now that we have analysis
     await saveToCache(currentVideoId);
   } catch (error) {
+    if (analysisVideoId !== currentVideoId || analysisGeneration !== digestGeneration) return;
     console.error("[YouTube Digest Panel] Analysis error:", error);
     if (chapterList)
       chapterList.innerHTML = `<li class="chapter-item" style="color: var(--accent); border: none;">Error: ${escapeHtml(error.message)}</li>`;
@@ -1565,14 +1582,18 @@ async function seekTo(seconds) {
 
   const payload = {
     action: "seekTo",
+    videoId: currentVideoId,
     seconds: Number(seconds),
   };
 
   try {
-    // Try direct messaging to the stored YouTube tab first (fastest/reliable)
+    const activeVideoTab = await chrome.tabs.get(youtubeTabId);
+    if (DIGEST_VIDEO.parse(activeVideoTab.url)?.id !== currentVideoId) return;
+    // Try direct messaging to the stored video tab first.
     if (youtubeTabId) {
       try {
-        await chrome.tabs.sendMessage(youtubeTabId, payload);
+        const response = await chrome.tabs.sendMessage(youtubeTabId, payload);
+        if (response?.success === false) return;
         debugLog("[YouTube Digest Panel] seekTo direct success");
         return;
       } catch (directErr) {
@@ -1586,6 +1607,8 @@ async function seekTo(seconds) {
     // Fallback: route through background script
     const result = await chrome.runtime.sendMessage({
       action: "relayToContent",
+      tabId: youtubeTabId,
+      videoId: currentVideoId,
       payload,
     });
     debugLog("[YouTube Digest Panel] seekTo relay result:", result);
@@ -1617,6 +1640,7 @@ async function highlightMomentsOnPage(moments) {
     // Route through background script for reliable message passing
     await chrome.runtime.sendMessage({
       action: "relayToContent",
+      tabId: youtubeTabId,
       payload: {
         action: "highlightMoments",
         moments: moments,
@@ -1971,6 +1995,7 @@ async function saveToCache(videoId) {
       transcriptText: currentTranscriptText,
       transcriptTimestamped: currentTranscriptTimestamped,
       transcriptLanguage: currentTranscriptLanguage,
+      source: currentTranscriptSource,
       videoTitle: currentVideoTitle,
       channelName: currentChannelName,
       paragraphCache: paragraphCacheForVideo,
@@ -2046,6 +2071,9 @@ async function loadFromCache(videoId) {
     const cached = result[`digest_${videoId}`];
 
     if (!cached) return null;
+    // Ignore unverified 1.3.0 captions and derived summaries/translations.
+    // Keep existing notes and stored data intact; a successful fetch replaces the cache.
+    if (!DIGEST_VIDEO.validTranscriptSource(videoId, cached.source)) return null;
 
     // Cache expires after 30 days
     const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
@@ -2279,7 +2307,9 @@ async function playbackTrackingTick() {
   try {
     const result = await chrome.runtime.sendMessage({
       action: "relayToContent",
-      payload: { action: "getCurrentTime" },
+      tabId: youtubeTabId,
+      videoId: currentVideoId,
+      payload: { action: "getCurrentTime", videoId: currentVideoId },
     });
 
     if (!result.success || !result.response) return;

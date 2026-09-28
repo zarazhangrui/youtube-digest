@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>YouTube Digest</title>
+    <title>Video Digest</title>
     <link rel="stylesheet" href="sidepanel.css" />
   </head>
   <body>
     <!-- HEADER -->
-    <!-- Note: the panel's own "YouTube Digest" title is shown by Chrome's side-panel
+    <!-- Note: the panel's own "Video Digest" title is shown by Chrome's side-panel
          title bar, so we don't repeat a logo here. -->
     <div class="header">
       <div class="header-top">
@@ -22,8 +22,8 @@
             class="settings-btn"
             id="settingsBtn"
             type="button"
-            title="Open YouTube Digest settings"
-            aria-label="Open YouTube Digest settings"
+            title="Open Video Digest settings"
+            aria-label="Open Video Digest settings"
           >
             Settings
           </button>
@@ -76,8 +76,7 @@
         <div class="welcome-icon" aria-hidden="true"></div>
         <div class="welcome-title">Ready to Digest</div>
         <div class="welcome-desc">
-          Navigate to a YouTube video and click the extension icon to get an
-          AI-powered digest.
+          打开 YouTube 或 B 站视频，点击扩展图标，即可阅读字幕、生成摘要和记笔记。
         </div>
       </div>
 
@@ -263,6 +262,7 @@
     </button>
 
     <script src="settings.js"></script>
+    <script src="platforms.js"></script>
     <script src="sidepanel.js"></script>
   </body>
 </html>

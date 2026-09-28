@@ -14,6 +14,8 @@
 // Import safe defaults and validation helpers. Secret keys live in
 // chrome.storage.local and are never part of the extension source.
 importScripts("settings.js");
+importScripts("platforms.js");
+importScripts("bilibili.js");
 
 const DEBUG = false;
 const AI_PROVIDER_IDLE_TIMEOUT_MS = 50_000;
@@ -234,7 +236,7 @@ async function readBoundedAiResponse(response, onActivity) {
  * Chrome's Side Panel API lets us show a persistent panel alongside the page.
  */
 chrome.action.onClicked.addListener((tab) => {
-  if (!(tab.url || "").startsWith("https://www.youtube.com")) {
+  if (!DIGEST_VIDEO.supports(tab.url)) {
     void updatePanelForTab(tab.id, tab.url, tab.windowId);
     return;
   }
@@ -292,8 +294,8 @@ async function closePanelForTab(tabId, windowId) {
 }
 
 async function updatePanelForTab(tabId, url, windowId) {
-  const isYouTube = (url || "").startsWith("https://www.youtube.com");
-  if (!isYouTube) {
+  const isSupportedVideo = DIGEST_VIDEO.supports(url);
+  if (!isSupportedVideo) {
     // Close the visible instance first. Then disable this tab so Chrome cannot
     // reopen the global default panel as navigation settles.
     await closePanelForTab(tabId, windowId);
@@ -350,7 +352,7 @@ chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // We need to return true to indicate we'll respond asynchronously
   if (message.action === "fetchTranscript") {
-    handleFetchTranscript(message.videoId)
+    handleFetchTranscript(message.videoId, message.tabId ?? sender.tab?.id)
       .then(sendResponse)
       .catch((err) => sendResponse({ error: err.message }));
     return true; // Keep the message channel open for async response
@@ -508,31 +510,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     debugLog("[YouTube Digest BG] Relay request:", message.payload?.action);
     (async () => {
       try {
-        // Query specifically for YouTube tabs to avoid side panel context issues
-        // Try multiple query strategies to find the right tab
-        let tabs = await chrome.tabs.query({
-          active: true,
-          lastFocusedWindow: true,
-        });
-        debugLog(
-          "[YouTube Digest BG] Active tab in last focused window:",
-          tabs.length,
-          tabs[0]?.url,
-        );
-
-        // If no YouTube tab found, try broader query
-        if (!tabs[0] || !tabs[0].url?.includes("youtube.com")) {
-          tabs = await chrome.tabs.query({
-            url: "https://www.youtube.com/*",
-            active: true,
-          });
-          debugLog("[YouTube Digest BG] Active YouTube tabs:", tabs.length);
-        }
-
-        // Still nothing? Try any YouTube tab
-        if (!tabs[0]) {
-          tabs = await chrome.tabs.query({ url: "https://www.youtube.com/*" });
-          debugLog("[YouTube Digest BG] Any YouTube tabs:", tabs.length);
+        // Bind panel requests to their own tab. Never control an unrelated video.
+        const tabs = Number.isInteger(message.tabId)
+          ? [await chrome.tabs.get(message.tabId)]
+          : await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        if (!DIGEST_VIDEO.supports(tabs[0]?.url) ||
+            (message.videoId && DIGEST_VIDEO.parse(tabs[0].url)?.id !== message.videoId)) {
+          throw new Error("VIDEO_CHANGED");
         }
 
         if (tabs[0]) {
@@ -556,7 +540,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // truncated while the box is collapsed. We fall back to the DOM
           // only for fields the player didn't provide.
           if (message.payload?.action === "getVideoInfo") {
-            const playerInfo = await getPlayerVideoDetails(tabs[0].id);
+            const identity = DIGEST_VIDEO.parse(tabs[0].url);
+            const playerInfo = identity?.platform === "bilibili"
+              ? (await readBilibili(identity.id, tabs[0].id, false)).info
+              : await getPlayerVideoDetails(tabs[0].id);
             if (playerInfo) {
               response = {
                 title: playerInfo.title || response?.title || "",
@@ -639,7 +626,27 @@ async function getPlayerVideoDetails(tabId) {
  * @param {string} videoId - The YouTube video ID (e.g., "dQw4w9WgXcQ")
  * @returns {Object} - { success, transcript, transcriptText, language } or { success: false, error }
  */
-async function handleFetchTranscript(videoId) {
+async function readBilibili(videoId, requestedTabId, includeTranscript = true) {
+  try {
+    const tabs = Number.isInteger(requestedTabId)
+      ? [await chrome.tabs.get(requestedTabId)]
+      : await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    const tab = tabs.find((tab) => DIGEST_VIDEO.parse(tab.url)?.id === videoId);
+    if (!tab) return { success: false, error: "VIDEO_CHANGED", message: "请打开对应的 B 站视频后重试。" };
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id }, world: "MAIN", func: DIGEST_BILI.readInPage,
+      args: [videoId, includeTranscript],
+    });
+    return results?.[0]?.result || { success: false, error: "BILI_FETCH_FAILED", message: "请刷新 B 站页面后重试。" };
+  } catch {
+    return { success: false, error: "BILI_FETCH_FAILED", message: "无法连接 B 站页面，请刷新视频后重试。" };
+  }
+}
+
+async function handleFetchTranscript(videoId, tabId) {
+  if (DIGEST_VIDEO.fromId(videoId)?.platform === "bilibili") {
+    return readBilibili(videoId, tabId);
+  }
   try {
     const settings = await getSettings();
     if (!settings.supadataApiKey) {
@@ -652,7 +659,7 @@ async function handleFetchTranscript(videoId) {
 
     // Share only the canonical watch URL. This strips playlist, referral,
     // timestamp, and other browsing parameters from the active tab URL.
-    const canonicalVideoUrl = YTD_SETTINGS.canonicalYouTubeUrl(videoId);
+    const canonicalVideoUrl = DIGEST_VIDEO.url(videoId);
     // Using the universal transcript endpoint with text=false to get timestamped chunks
     const apiUrl = new URL("https://api.supadata.ai/v1/transcript");
     apiUrl.searchParams.set("url", canonicalVideoUrl);
@@ -1141,7 +1148,7 @@ async function handleSaveNote(
   selectedText,
 ) {
   try {
-    const canonicalVideoUrl = YTD_SETTINGS.canonicalYouTubeUrl(videoId);
+    const canonicalVideoUrl = DIGEST_VIDEO.url(videoId);
     const safeTimestamp = Math.max(0, Math.floor(Number(timestamp) || 0));
     const exactSelectedText =
       typeof selectedText === "string"
@@ -1164,7 +1171,7 @@ async function handleSaveNote(
           typeof channelName === "string" ? channelName.slice(0, 300) : "",
         timestamp: `${minutes}:${String(seconds).padStart(2, "0")}`,
         timestampSeconds: safeTimestamp,
-        timestampedUrl: `${canonicalVideoUrl}&t=${safeTimestamp}s`,
+        timestampedUrl: DIGEST_VIDEO.url(videoId, safeTimestamp),
         text: exactSelectedText,
         rawText: exactSelectedText,
         createdAt: Date.now(),
@@ -1182,7 +1189,7 @@ async function handleSaveNote(
     let transcript = null;
     try {
       const cached = await chrome.storage.local.get(`digest_${videoId}`);
-      if (cached[`digest_${videoId}`]?.transcript) {
+      if (cached[`digest_${videoId}`]?.transcript && DIGEST_VIDEO.validTranscriptSource(videoId, cached[`digest_${videoId}`].source)) {
         transcript = cached[`digest_${videoId}`].transcript;
         debugLog("[YouTube Digest] Using cached transcript for note");
       }
@@ -1194,7 +1201,7 @@ async function handleSaveNote(
     if (!transcript) {
       const transcriptResult = await handleFetchTranscript(videoId);
       if (!transcriptResult.success) {
-        return { success: false, error: "Could not fetch transcript" };
+        return { success: false, error: transcriptResult.error, message: transcriptResult.message || "Could not fetch transcript" };
       }
       transcript = transcriptResult.transcript;
     }
@@ -1280,7 +1287,7 @@ async function handleSaveNote(
     const formattedTimestamp = `${minutes}:${String(seconds).padStart(2, "0")}`;
 
     // Create timestamped URL
-    const timestampedUrl = `${canonicalVideoUrl}&t=${safeTimestamp}s`;
+    const timestampedUrl = DIGEST_VIDEO.url(videoId, safeTimestamp);
 
     // Create the note object
     const note = {

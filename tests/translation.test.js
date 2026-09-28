@@ -17,6 +17,7 @@ function loadSidepanelHelpers({
   const localStorage = {};
   const sandbox = {
     console,
+    DIGEST_VIDEO: require("../platforms.js"),
     URL,
     TextDecoder,
     TextEncoder,
@@ -89,6 +90,7 @@ function loadBackgroundHelpers({
   const localStorage = { ytd_settings: settings };
   const sandbox = {
     console,
+    DIGEST_VIDEO: require("../platforms.js"),
     URL,
     TextDecoder,
     TextEncoder,
