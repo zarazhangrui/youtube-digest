@@ -10,6 +10,7 @@
     "https://api.supadata.ai/*",
     "https://api.deepseek.com/*"
   ],
+  "optional_host_permissions": ["https://api.openai.com/*"],
   "action": {
     "default_title": "Open YouTube Digest",
     "default_icon": {

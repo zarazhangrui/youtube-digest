@@ -4,7 +4,7 @@
  * This is the "brain" of the extension. It runs in the background and handles:
  * 1. Opening the side panel when the user clicks the extension icon
  * 2. Fetching YouTube transcripts via Supadata API
- * 3. Calling DeepSeek to analyze the transcript
+ * 3. Calling the configured AI provider to analyze the transcript
  * 4. Sending results back to the side panel
  *
  * Think of it like a backend server — it does the heavy lifting
@@ -77,26 +77,32 @@ async function requestAiCompletion({
   maxTokens,
   temperature,
   responseFormat,
+  settings,
 }) {
-  const settings = await getSettings();
-  if (!settings.aiApiKey) {
+  settings ??= await getSettings();
+  const apiKey = YTD_SETTINGS.getAiApiKey(settings);
+  const { label } = YTD_SETTINGS.AI_PROVIDERS[settings.provider];
+  if (!apiKey) {
     const error = new Error(
-      "DeepSeek API key not configured. Open YouTube Digest Settings.",
+      `${label} API key not configured. Open YouTube Digest Settings.`,
     );
     error.code = "NO_AI_KEY";
     throw error;
   }
   const body = {
     model: settings.aiModel,
-    max_tokens: maxTokens,
     messages,
   };
   if (typeof temperature === "number") body.temperature = temperature;
   if (responseFormat) {
     body.response_format = responseFormat;
   }
-  // Product features need bounded, predictable latency rather than reasoning traces.
-  body.thinking = { type: "disabled" };
+  if (settings.provider === "deepseek") {
+    body.max_tokens = maxTokens;
+    body.thinking = { type: "disabled" };
+  } else {
+    body.max_completion_tokens = maxTokens;
+  }
 
   const controller = new AbortController();
   let timeoutKind = "";
@@ -122,14 +128,15 @@ async function requestAiCompletion({
   resetIdleTimeout();
   try {
     const response = await fetch(
-      YTD_SETTINGS.chatCompletionsUrl(),
+      YTD_SETTINGS.chatCompletionsUrl(settings.provider),
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${settings.aiApiKey}`,
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify(body),
+        redirect: "error",
         signal: controller.signal,
       },
     );
@@ -137,37 +144,41 @@ async function requestAiCompletion({
     // may then send blank-line body chunks while a non-streaming request queues.
     resetIdleTimeout();
 
-    const data = await readBoundedAiResponse(response, resetIdleTimeout);
     if (!response.ok) {
-      const errorData = data && typeof data === "object" ? data : {};
+      // Provider error bodies can echo submitted credentials or private text.
+      void response.body?.cancel?.().catch(() => {});
+      const statusMessages = {
+        401: `${label} rejected the API key. Check the key in Settings.`,
+        403: `${label} denied access. Check the API key and project permissions.`,
+        429: `${label} rate limit or quota reached. Check API usage and billing.`,
+      };
       const error = new Error(
-        errorData.error?.message ||
-          errorData.message ||
-          `DeepSeek error: ${response.status}`,
+        statusMessages[response.status] || `${label} error: ${response.status}`,
       );
       error.status = response.status;
       throw error;
     }
+    const data = await readBoundedAiResponse(response, resetIdleTimeout);
 
     const text = data.choices?.[0]?.message?.content;
     if (typeof text !== "string" || !text.trim()) {
-      const error = new Error("DeepSeek returned an empty response.");
+      const error = new Error(`${label} returned an empty response.`);
       error.code = "EMPTY_AI_RESPONSE";
       throw error;
     }
 
-    return { text, settings };
+    return { text };
   } catch (error) {
     if (timeoutKind === "idle") {
       const timeoutError = new Error(
-        "DeepSeek request was inactive for 50 seconds. Please Retry.",
+        `${label} request was inactive for 50 seconds. Please Retry.`,
       );
       timeoutError.code = "AI_IDLE_TIMEOUT";
       throw timeoutError;
     }
     if (timeoutKind === "hard") {
       const timeoutError = new Error(
-        "DeepSeek request exceeded the 120-second limit. Please Retry.",
+        `${label} request exceeded the 120-second limit. Please Retry.`,
       );
       timeoutError.code = "AI_HARD_TIMEOUT";
       throw timeoutError;
@@ -194,7 +205,7 @@ async function readBoundedAiResponse(response, onActivity) {
       responseBytes += byteLength;
       if (responseBytes > AI_PROVIDER_MAX_RESPONSE_BYTES) {
         await reader.cancel?.().catch(() => {});
-        const error = new Error("DeepSeek response exceeded the 2 MiB limit.");
+        const error = new Error("AI response exceeded the 2 MiB limit.");
         error.code = "AI_RESPONSE_TOO_LARGE";
         throw error;
       }
@@ -211,7 +222,7 @@ async function readBoundedAiResponse(response, onActivity) {
     onActivity();
     const byteLength = new TextEncoder().encode(responseText).byteLength;
     if (byteLength > AI_PROVIDER_MAX_RESPONSE_BYTES) {
-      const error = new Error("DeepSeek response exceeded the 2 MiB limit.");
+      const error = new Error("AI response exceeded the 2 MiB limit.");
       error.code = "AI_RESPONSE_TOO_LARGE";
       throw error;
     }
@@ -371,7 +382,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === "explainSelection") {
-    // Explain selected text using DeepSeek.
+    // Explain selected text using the selected AI provider.
     handleExplainSelection(
       message.selectedText,
       message.transcriptContext,
@@ -420,7 +431,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // Translation: send content to DeepSeek.
+  // Translation: send content to the selected AI provider.
   if (message.action === "translateContent") {
     handleTranslateContent(
       message.content,
@@ -438,7 +449,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((settings) =>
         sendResponse({
           hasSupadataKey: !!settings.supadataApiKey,
-          hasAiKey: !!settings.aiApiKey,
+          hasAiKey: !!YTD_SETTINGS.getAiApiKey(settings),
         }),
       )
       .catch((error) => sendResponse({ error: error.message }));
@@ -745,7 +756,7 @@ async function handleFetchTranscript(videoId) {
           // Plain text without timestamps (for display/export)
           transcriptTextPlain += cleanText + " ";
 
-          // Timestamped text for DeepSeek (format: [MM:SS] text)
+          // Timestamped text for model prompts (format: [MM:SS] text)
           // This allows the model to reference actual transcript positions.
           transcriptTextTimestamped += `[${timestamp}] ${cleanText}\n`;
         }
@@ -894,11 +905,11 @@ function parseLooseJson(text) {
 }
 
 // ============================================================
-// DEEPSEEK ANALYSIS
+// AI ANALYSIS
 // ============================================================
 
 /**
- * Sends the transcript to DeepSeek for analysis.
+ * Sends the transcript to the selected AI provider for analysis.
  *
  * The prompt asks the model to produce chapters covering the whole video
  * and 3-5 key quotes with timestamps.
@@ -917,11 +928,11 @@ async function handleAnalyzeTranscript(
 ) {
   try {
     const settings = await getSettings();
-    if (!settings.aiApiKey) {
+    if (!YTD_SETTINGS.getAiApiKey(settings)) {
       return {
         success: false,
         error: "NO_AI_KEY",
-        message: "DeepSeek API key not configured. Open YouTube Digest Settings.",
+        message: "Configure the selected AI provider’s API key in YouTube Digest Settings.",
       };
     }
 
@@ -977,6 +988,7 @@ async function handleAnalyzeTranscript(
 
     debugLog("[YouTube Digest] Requesting video analysis", settings.aiModel);
     const { text: responseText } = await requestAiCompletion({
+      settings,
       maxTokens: 8192,
       responseFormat: { type: "json_object" },
       messages: [
@@ -998,18 +1010,18 @@ async function handleAnalyzeTranscript(
     };
   } catch (error) {
     console.error("Analysis error:", error);
-    if (error.status === 401) {
+    if (error.status === 401 || error.status === 403) {
       return {
         success: false,
         error: "INVALID_AI_KEY",
-        message: "DeepSeek rejected the API key.",
+        message: error.message,
       };
     }
     if (error.status === 429) {
       return {
         success: false,
         error: "RATE_LIMITED",
-        message: "DeepSeek rate-limited this request. Try again shortly.",
+        message: error.message,
       };
     }
     return {
@@ -1023,7 +1035,7 @@ async function handleAnalyzeTranscript(
  * Validates all timestamps in the analysis and fixes any that exceed video duration.
  * This is a safety net to prevent hallucinated timestamps from reaching the UI.
  *
- * @param {Object} analysis - The parsed analysis from DeepSeek
+ * @param {Object} analysis - The parsed analysis from the AI provider
  * @param {number} maxSeconds - Maximum valid timestamp in seconds
  * @returns {Object} - Analysis with validated timestamps
  */
@@ -1117,7 +1129,7 @@ async function handleGetVideoInfo(tabId) {
 // ============================================================
 
 /**
- * Explains selected text using DeepSeek.
+ * Explains selected text using the selected AI provider.
  * Provides context, definitions, and clarification for complex terms.
  *
  * @param {string} selectedText - The text the user selected
@@ -1265,7 +1277,7 @@ async function handleSaveNote(
       }
     }
 
-    // Clean up the text with DeepSeek.
+    // Clean up the text with the selected AI provider.
     const cleanedText = await cleanupNoteText(
       matchedLine.text,
       beforeLine,
@@ -1314,7 +1326,7 @@ async function handleSaveNote(
 }
 
 /**
- * Cleans up transcript lines using DeepSeek.
+ * Cleans up transcript lines using the selected AI provider.
  * Takes the target line plus buffer sentences (1 before, 1 after).
  * Uses JSON output to prevent any preambles from appearing.
  */
@@ -1326,7 +1338,7 @@ async function cleanupNoteText(
   videoTitle,
 ) {
   const settings = await getSettings();
-  if (!settings.aiApiKey) {
+  if (!YTD_SETTINGS.getAiApiKey(settings)) {
     return [beforeText, targetText, afterText].filter(Boolean).join(" ");
   }
 
@@ -1350,6 +1362,7 @@ async function cleanupNoteText(
       variables,
     );
     const { text: resultText } = await requestAiCompletion({
+      settings,
       maxTokens: 512,
       responseFormat: { type: "json_object" },
       messages: [
@@ -1449,11 +1462,11 @@ async function handleExplainSelection(
 ) {
   try {
     const settings = await getSettings();
-    if (!settings.aiApiKey) {
+    if (!YTD_SETTINGS.getAiApiKey(settings)) {
       return {
         success: false,
         error: "NO_AI_KEY",
-        message: "DeepSeek API key not configured.",
+        message: "Configure the selected AI provider’s API key in Settings.",
       };
     }
 
@@ -1475,6 +1488,7 @@ async function handleExplainSelection(
 
     debugLog("[YouTube Digest] Requesting selection explanation");
     const { text: explanation } = await requestAiCompletion({
+      settings,
       maxTokens: 1024,
       messages: [
         { role: "system", content: systemPrompt },
@@ -1592,7 +1606,7 @@ function normalizeTranslatedSegmentBatch(parsed, sourceSegments) {
 }
 
 /**
- * Translates content using DeepSeek.
+ * Translates content using the selected AI provider.
  * @param {Object} content - JSON object containing semantic transcript segments
  * @param {string} contentType - 'transcriptBatch' or 'interfaceBatch'
  * @param {string} targetLanguage - 'zh' for Simplified Chinese
@@ -1620,8 +1634,11 @@ async function handleTranslateContent(
     }
 
     const settings = await getSettings();
-    if (!settings.aiApiKey) {
-      return { success: false, error: "DeepSeek API key not configured" };
+    if (!YTD_SETTINGS.getAiApiKey(settings)) {
+      return {
+        success: false,
+        error: "Configure the selected AI provider’s API key in Settings.",
+      };
     }
 
     const sourceSegments = validateTranscriptBatchRequest(content);
@@ -1645,6 +1662,7 @@ async function handleTranslateContent(
       temperature: 0.2,
       maxTokens: 1536,
       responseFormat: { type: "json_object" },
+      settings,
     };
     let result = await callAiTranslation(
       systemPrompt,
@@ -1654,11 +1672,13 @@ async function handleTranslateContent(
 
     // DeepSeek JSON mode can rarely return an empty content string. The prompt
     // already requires JSON, so retry once without response_format.
-    if (!result.success && result.code === "EMPTY_AI_RESPONSE") {
-      result = await callAiTranslation(systemPrompt, userContent, {
-        temperature: translationOptions.temperature,
-        maxTokens: translationOptions.maxTokens,
-      });
+    if (
+      settings.provider === "deepseek" &&
+      !result.success &&
+      result.code === "EMPTY_AI_RESPONSE"
+    ) {
+      const { responseFormat, ...retryOptions } = translationOptions;
+      result = await callAiTranslation(systemPrompt, userContent, retryOptions);
     }
     if (!result.success) return result;
 
@@ -1678,7 +1698,7 @@ async function handleTranslateContent(
 }
 
 /**
- * Makes a single DeepSeek call for translation.
+ * Makes a single model request for translation.
  * Uses temperature 0.3 for consistent, predictable translations.
  *
  * @param {string} systemPrompt - The system-level instructions
@@ -1688,10 +1708,11 @@ async function handleTranslateContent(
 async function callAiTranslation(
   systemPrompt,
   userContent,
-  { temperature = 0.3, maxTokens = 8192, responseFormat } = {},
+  { temperature = 0.3, maxTokens = 8192, responseFormat, settings } = {},
 ) {
   try {
     const { text } = await requestAiCompletion({
+      settings,
       temperature,
       maxTokens,
       responseFormat,
@@ -1706,7 +1727,7 @@ async function callAiTranslation(
     if (error.status === 429) {
       return {
         success: false,
-        error: "Rate limited — try again in a moment",
+        error: error.message,
         code: "RATE_LIMITED",
       };
     }

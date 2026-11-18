@@ -34,7 +34,7 @@ YouTube Digest 是一个需要自行提供 API Key 的开源项目，通过 GitH
 你的 Agent 应该帮你：
 
 1. 先询问你想把项目长期保存在哪里，再下载或克隆到那里，并告诉你准确的完整路径。如果你需要建议，可以推荐 macOS 或 Linux 上的 `~/Documents/youtube-digest`，或 Windows 上的 `%USERPROFILE%\Documents\youtube-digest`。
-2. 打开下方 Supadata 和 DeepSeek 官方页面，指导你创建自己的账号。
+2. 打开 Supadata 和你所选 AI 服务的官方页面。
 3. 指导你在 Chrome 中通过“加载已解压的扩展程序”选择你刚才确定的那个准确项目文件夹。
 4. 告诉你应该在扩展的“设置”页面哪个位置填写 API Key。
 5. 打开一个带字幕的 YouTube 视频，确认字幕和翻译功能可以使用。
@@ -63,7 +63,7 @@ YouTube Digest 是一个需要自行提供 API Key 的开源项目，通过 GitH
 YouTube Digest 需要你在自己的服务账号中准备两个 Key：
 
 1. **Supadata API Key**，用于获取 YouTube 字幕。
-2. **DeepSeek API Key**，用于生成概览、讲解内容、翻译和自动润色笔记。
+2. **OpenAI 或 DeepSeek API Key**，用于生成概览、讲解内容、翻译和自动润色笔记。只需为选中的 AI 服务填写密钥。
 
 ### 获取 Supadata API Key
 
@@ -88,14 +88,13 @@ YouTube Digest 需要你在自己的服务账号中准备两个 Key：
 
 在侧边栏中打开 **Settings**。你也可以在 `chrome://extensions` 的 YouTube Digest 卡片中打开扩展选项。Key 只能粘贴到这些设置输入框中。不要把 Key 发送到 AI 对话、项目文件、截图或公开消息中。
 
-发布版本只支持 DeepSeek V4 Flash：
+### 使用 OpenAI（GPT-4.1 mini）
 
-```text
-Base URL: https://api.deepseek.com
-Model: deepseek-v4-flash
-```
+1. 在 [OpenAI API Keys 页面](https://platform.openai.com/api-keys)创建密钥。
+2. 在 YouTube Digest 的 **Settings → AI 服务**里选择 **OpenAI GPT-4.1 mini**，在 **OpenAI API 密钥**中粘贴密钥。
+3. 保存设置。Chrome 提示时允许访问 `api.openai.com`，然后重新打开侧边栏。
 
-YouTube Digest 会让所有 DeepSeek 请求使用非思考模式，以获得更快、更稳定的交互。设置中的接口地址和模型固定，只需要填写 DeepSeek API Key。如果想使用其他服务或模型，请在设置中复制安全的自定义 prompt，让编程 Agent 修改你自己的本地副本。不要把任何 API Key 放进 prompt 或对话。
+DeepSeek V4 Flash 仍可选，两个服务的密钥分别保存。切换服务后，新请求会用所选服务，已经缓存的概览和译文仍可复用。OpenAI 用量请参考 [OpenAI API 价格](https://openai.com/api/pricing/)。下文的 DeepSeek 价格适用于 DeepSeek 请求。
 
 API Key 和设置保存在你设备上的 Chrome 扩展本地存储中。发布包不会包含或使用 `config.js`。
 
@@ -116,7 +115,7 @@ API Key 和设置保存在你设备上的 Chrome 扩展本地存储中。发布�
 - 原文、简体中文和双语对照字幕。
 - AI 概览、选中文本讲解、翻译和自动润色笔记。
 - 本地笔记，以及最近字幕、概览和翻译的本地缓存。
-- 发布版本的所有 AI 功能都使用 DeepSeek V4 Flash。其他服务需要修改本地代码，不属于发布版本的支持范围。
+- 所有 AI 功能均可使用 DeepSeek V4 Flash 或 OpenAI GPT-4.1 mini。
 
 Shorts、直播、私密视频、受访问限制的视频，以及没有原生字幕的视频可能无法使用。目前没有测试 Firefox、Safari、移动浏览器或其他 Chromium 浏览器。
 
@@ -134,7 +133,7 @@ YouTube Digest 强制使用 Supadata 的 `mode=native`，不会在没有原生�
 
 按照当前只获取原生字幕的方式，如果每次请求都成功，免费版每月大约可以查询 100 个视频。重试和没有字幕的查询也会消耗额度，所以实际成功数量可能更少。
 
-DeepSeek 的额度与 Supadata 分开计算。YouTube Digest 不收款，也不转售 API 服务。建议为两个账号设置消费上限并定期查看用量。
+所选 AI 服务的用量与 Supadata 分开计算。YouTube Digest 不收款，也不转售 API 服务。建议为两个账号设置消费上限并定期查看用量。
 
 ## DeepSeek V4 Flash 价格
 
@@ -178,11 +177,11 @@ YouTube Digest 使用原生 HTML、CSS 和 JavaScript，没有构建步骤，很
 YouTube Digest 会直接从扩展向服务商发送请求：
 
 1. 把标准化的 YouTube 视频地址发送给 Supadata，用于获取原生字幕。
-2. 当你使用 AI 功能时，把字幕和相关视频信息发送给 DeepSeek。
+2. 当你使用 AI 功能时，把字幕和相关视频信息发送给所选 AI 服务。
 3. 翻译或讲解等功能只发送当前需要的内容，例如选中的文本和上下文，或少量字幕分段。
 4. API Key、设置、笔记和最近缓存保存在 Chrome 本地。
 
-YouTube Digest 没有账号系统、广告、分析统计或行为追踪。Supadata 和 DeepSeek 仍会按照各自的条款和隐私政策处理数据。详情请查看 [PRIVACY.md](PRIVACY.md)。
+YouTube Digest 没有账号系统、广告、分析统计或行为追踪。Supadata 和你所选的 AI 服务会按照各自的条款和隐私政策处理数据。详情请查看 [PRIVACY.md](PRIVACY.md)。
 
 ## 常见问题
 
@@ -203,9 +202,9 @@ YouTube Digest 没有账号系统、广告、分析统计或行为追踪。Supad
 
 ### YouTube Digest 提示需要设置
 
-- 打开 **Settings**，保存 Supadata Key 和 DeepSeek Key。
-- 发布版本固定使用 DeepSeek V4 Flash，没有需要填写的 Base URL 或 Model 字段。
-- 如果设置提示旧的自定义服务已移除，请重新填写 DeepSeek Key。旧 AI Key 已安全清除，避免被错误用于 DeepSeek。
+- 打开 **Settings**，保存 Supadata 密钥和所选 AI 服务的密钥。
+- 如果 Chrome 未授权访问 OpenAI，请重新保存 OpenAI 设置并允许访问 `api.openai.com`。
+- 如果设置提示旧的自定义服务已移除，请为当前选择的 AI 服务填写密钥。
 
 ### 找不到字幕
 
@@ -217,9 +216,9 @@ YouTube Digest 不会自动改用 AI 生成字幕。
 
 ### AI 请求失败
 
-- `401` 或 `403` 通常表示 DeepSeek Key 或账号权限有问题。
-- `429` 通常表示达到了 DeepSeek 服务限速或消费上限。
-- 确认 Key 来自上方链接的 DeepSeek 开放平台账号，并且账号有可用额度。
+- `401` 或 `403` 通常表示 所选 AI 服务的密钥或账号权限有问题。
+- `429` 通常表示达到了所选 AI 服务的速率或用量上限。
+- 确认密钥来自所选服务，并在该服务的控制台检查 API 用量和账单。
 - 如果你把本地副本改成了其他模型，请再次使用设置中的自定义 prompt，让编程 Agent 检查本地实现。
 
 不要在对话、截图或日志中分享 API Key、私密字幕或个人笔记。

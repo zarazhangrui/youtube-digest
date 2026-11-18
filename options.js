@@ -9,7 +9,7 @@ const YTD_OPTIONS = (() => {
       languageGroupLabel: "Interface language",
       heading: "Bring your own API keys",
       lede:
-        "Keys stay in this Chrome profile and are sent only to Supadata and DeepSeek. This open-source extension has no developer server or analytics.",
+        "Keys are stored in this Chrome profile and sent only to their respective services.",
       transcriptProvider: "Transcript provider",
       supadataApiKeyLabel: "Supadata API key",
       supadataHelp: "Used to fetch timestamped YouTube subtitles. ",
@@ -17,15 +17,15 @@ const YTD_OPTIONS = (() => {
       supadataHelpSuffix:
         ". Supadata generates the key during onboarding.",
       aiProvider: "AI provider",
-      providerSummaryLabel: "Supported AI provider",
-      providerBadge: "Supported in this version",
+      activeProvider: "Active AI provider",
+      providerHelp: "Only the selected provider needs a key.",
+      openAiApiKeyLabel: "OpenAI API key",
+      openAiKeyLink: "Create an OpenAI API key",
       deepseekApiKeyLabel: "DeepSeek API key",
-      deepseekHelp:
-        "YouTube Digest uses DeepSeek V4 Flash for overviews, explanations, translation, and note polishing. ",
       deepseekLink: "Create a DeepSeek API key",
       deepseekHelpSuffix: ".",
       privacyNote:
-        "When you use AI features, DeepSeek receives the video transcript and relevant video context. Review DeepSeek's terms and pricing before saving.",
+        "AI features send the relevant subtitles and video context to the selected provider.",
       saveSettings: "Save settings",
       localRemix: "Local remix",
       customizationTitle: "Want to use another AI model?",
@@ -59,6 +59,8 @@ const YTD_OPTIONS = (() => {
       saving: "Saving…",
       addSupadataKey: "Add a Supadata API key.",
       addDeepseekKey: "Add a DeepSeek API key.",
+      addOpenAiKey: "Add an OpenAI API key.",
+      allowOpenAi: "Allow access to api.openai.com to use OpenAI.",
       saved: "Saved. Reopen YouTube Digest to use these settings.",
       saveFailed: "Could not save settings. Please try again.",
       copying: "Copying…",
@@ -79,22 +81,22 @@ const YTD_OPTIONS = (() => {
       languageGroupLabel: "界面语言",
       heading: "使用你自己的 API 密钥",
       lede:
-        "密钥仅保存在当前 Chrome 个人资料中，只会发送给 Supadata 和 DeepSeek。本开源扩展没有开发者服务器，也不使用分析服务。",
+        "密钥保存在当前 Chrome 个人资料中，并且只会发送给各自对应的服务。",
       transcriptProvider: "字幕服务",
       supadataApiKeyLabel: "Supadata API 密钥",
       supadataHelp: "用于获取带时间戳的 YouTube 字幕。",
       supadataLink: "创建 Supadata 账号并获取密钥",
       supadataHelpSuffix: "。Supadata 会在引导流程中生成密钥。",
       aiProvider: "AI 服务",
-      providerSummaryLabel: "支持的 AI 服务",
-      providerBadge: "当前版本支持",
+      activeProvider: "当前 AI 服务",
+      providerHelp: "只需填写所选服务的密钥。",
+      openAiApiKeyLabel: "OpenAI API 密钥",
+      openAiKeyLink: "创建 OpenAI API 密钥",
       deepseekApiKeyLabel: "DeepSeek API 密钥",
-      deepseekHelp:
-        "YouTube Digest 使用 DeepSeek V4 Flash 生成概览、解释内容、翻译字幕和润色笔记。",
       deepseekLink: "创建 DeepSeek API 密钥",
       deepseekHelpSuffix: "。",
       privacyNote:
-        "使用 AI 功能时，DeepSeek 会收到视频字幕及相关视频上下文。保存前请查看 DeepSeek 的服务条款和价格。",
+        "使用 AI 功能时，相关字幕和视频上下文会发给所选服务。",
       saveSettings: "保存设置",
       localRemix: "本地改造",
       customizationTitle: "想使用其他 AI 模型？",
@@ -127,6 +129,8 @@ const YTD_OPTIONS = (() => {
       saving: "正在保存…",
       addSupadataKey: "请添加 Supadata API 密钥。",
       addDeepseekKey: "请添加 DeepSeek API 密钥。",
+      addOpenAiKey: "请添加 OpenAI API 密钥。",
+      allowOpenAi: "请允许访问 api.openai.com，以使用 OpenAI。",
       saved: "已保存。请重新打开 YouTube Digest 以使用这些设置。",
       saveFailed: "无法保存设置，请重试。",
       copying: "正在复制…",
@@ -348,6 +352,8 @@ const YTD_OPTIONS = (() => {
       getSafeLocalStorage(root),
     );
     const form = doc.getElementById("settingsForm");
+    const providerInput = doc.getElementById("provider");
+    const openAiApiKeyInput = doc.getElementById("openAiApiKey");
     const aiApiKeyInput = doc.getElementById("aiApiKey");
     const supadataApiKeyInput = doc.getElementById("supadataApiKey");
     const customizationPrompt = doc.getElementById("customizationPrompt");
@@ -420,6 +426,8 @@ const YTD_OPTIONS = (() => {
         );
         const settings = migration.settings;
 
+        providerInput.value = settings.provider;
+        openAiApiKeyInput.value = settings.openAiApiKey;
         aiApiKeyInput.value = settings.aiApiKey;
         supadataApiKeyInput.value = settings.supadataApiKey;
         if (migration.migrated) {
@@ -445,6 +453,8 @@ const YTD_OPTIONS = (() => {
       setStatus(saveStatus, "saving");
 
       const settings = settingsApi.normalize({
+        provider: providerInput.value,
+        openAiApiKey: openAiApiKeyInput.value,
         aiApiKey: aiApiKeyInput.value,
         supadataApiKey: supadataApiKeyInput.value,
       });
@@ -453,16 +463,30 @@ const YTD_OPTIONS = (() => {
         setStatus(saveStatus, "addSupadataKey");
         return;
       }
-      if (!settings.aiApiKey) {
-        setStatus(saveStatus, "addDeepseekKey");
+      const usesOpenAi = settings.provider === "openai";
+      if (!settingsApi.getAiApiKey(settings)) {
+        setStatus(saveStatus, usesOpenAi ? "addOpenAiKey" : "addDeepseekKey");
         return;
       }
 
+      const saveButton = form.querySelector('[type="submit"]');
+      saveButton.disabled = true;
       try {
+        if (usesOpenAi) {
+          const allowed = await root.chrome?.permissions?.request({
+            origins: [settingsApi.OPENAI_ORIGIN],
+          });
+          if (!allowed) {
+            setStatus(saveStatus, "allowOpenAi");
+            return;
+          }
+        }
         await storage.set({ [settingsApi.STORAGE_KEY]: settings });
         setStatus(saveStatus, "saved");
       } catch (_error) {
         setStatus(saveStatus, "saveFailed");
+      } finally {
+        saveButton.disabled = false;
       }
     }
 

@@ -121,12 +121,14 @@ label {
 }
 
 input,
+select,
 textarea,
 button {
   font: inherit;
 }
 
 input,
+select,
 textarea {
   width: 100%;
   padding: 11px 12px;
@@ -137,6 +139,7 @@ textarea {
 }
 
 input:focus,
+select:focus,
 textarea:focus {
   border-color: var(--accent);
   outline: 3px solid rgba(200, 103, 79, 0.14);
@@ -168,7 +171,6 @@ a {
   font-size: 13px;
 }
 
-.provider-summary,
 .copy-actions {
   display: flex;
   align-items: center;
@@ -176,20 +178,6 @@ a {
   gap: 10px;
 }
 
-.provider-summary {
-  justify-content: space-between;
-  margin-bottom: 18px;
-  padding: 13px 14px;
-  border: 1px solid #ecd8ce;
-  border-radius: 12px;
-  background: #fdf6f2;
-}
-
-.provider-name {
-  font-weight: 800;
-}
-
-.provider-badge,
 .agent-badge {
   padding: 4px 9px;
   border-radius: 999px;

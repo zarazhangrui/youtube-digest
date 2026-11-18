@@ -51,6 +51,26 @@ test("legacy custom migration clears only the AI key and is idempotent", () => {
   assert.equal(configuredDeepSeek.aiApiKey, "new-deepseek-key");
 });
 
+test("switching AI providers keeps keys separate and pins their destinations", () => {
+  const openAi = settings.normalize({
+    provider: "openai",
+    aiApiKey: "  deepseek-test ",
+    openAiApiKey: "  openai-test ",
+    aiBaseUrl: "https://example.test",
+    aiModel: "another-model",
+  });
+
+  assert.equal(openAi.provider, "openai");
+  assert.equal(openAi.aiModel, "gpt-4.1-mini");
+  assert.equal(settings.chatCompletionsUrl(openAi.provider), "https://api.openai.com/v1/chat/completions");
+  assert.equal(settings.getAiApiKey(openAi), "openai-test");
+
+  const deepSeek = settings.normalize({ ...openAi, provider: "deepseek" });
+  assert.equal(settings.getAiApiKey(deepSeek), "deepseek-test");
+  assert.equal(deepSeek.openAiApiKey, "openai-test");
+  assert.equal(settings.getAiApiKey(settings.normalize({ ...openAi, openAiApiKey: "" })), "");
+});
+
 test("Supadata receives a canonical YouTube URL", () => {
   assert.equal(
     settings.canonicalYouTubeUrl("ydTeb_I0b94"),
