@@ -127,13 +127,7 @@ function loadBackgroundHelpers({
       },
       tabs: { onUpdated: listeners, onActivated: listeners },
     },
-    YTD_SETTINGS: {
-      STORAGE_KEY: "ytd_settings",
-      normalize: (value) => value,
-      chatCompletionsUrl: (baseUrl) => `${baseUrl}/chat/completions`,
-      canonicalYouTubeUrl: (videoId) =>
-        `https://www.youtube.com/watch?v=${videoId}`,
-    },
+    YTD_SETTINGS: require("../settings.js"),
   };
   sandbox.globalThis = sandbox;
   vm.runInNewContext(read("background.js"), sandbox);
@@ -523,6 +517,92 @@ test("all AI product requests use DeepSeek non-thinking and JSON behavior", asyn
       new RegExp(`async function ${callPath}\\([\\s\\S]*?requestAiCompletion\\(\\{`),
     );
   }
+});
+
+test("OpenAI translation uses its own endpoint, credential, and request fields", async () => {
+  const requests = [];
+  const helpers = loadBackgroundHelpers({
+    settings: {
+      provider: "openai",
+      aiApiKey: "deepseek-test",
+      openAiApiKey: "openai-test",
+      aiBaseUrl: "https://example.test",
+    },
+    fetchImpl: async (url, options) => {
+      if (url.startsWith("chrome-extension://")) {
+        return { ok: true, text: async () => read("prompts/translation.md") };
+      }
+      const { body, headers, redirect } = options;
+      requests.push({ url, authorization: headers.Authorization, body: JSON.parse(body), redirect });
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                segments: [{ id: "segment-0-0", text: "中文译文。" }],
+              }),
+            },
+          }],
+        }),
+      };
+    },
+  });
+  const result = await helpers.handleTranslateContent(
+    { segments: [{ id: "segment-0-0", text: "English source sentence." }] },
+    "transcriptBatch",
+    "zh",
+    "Video",
+  );
+
+  assert.equal(result.success, true);
+  assert.equal(result.translatedContent.segments[0].text, "中文译文。");
+  assert.equal(requests.length, 1);
+  const [{ url, authorization, body, redirect }] = requests;
+  assert.equal(url, "https://api.openai.com/v1/chat/completions");
+  assert.equal(authorization, "Bearer openai-test");
+  assert.equal(redirect, "error");
+  assert.equal(body.model, "gpt-4.1-mini");
+  assert.equal(body.max_completion_tokens, 1536);
+  assert.deepEqual(body.response_format, { type: "json_object" });
+  assert.equal(Object.hasOwn(body, "max_tokens"), false);
+  assert.equal(Object.hasOwn(body, "thinking"), false);
+});
+
+test("an empty OpenAI translation does not trigger DeepSeek's retry", async () => {
+  let requests = 0;
+  const helpers = loadBackgroundHelpers({
+    settings: { provider: "openai", openAiApiKey: "openai-test" },
+    fetchImpl: async (url) => {
+      if (url.startsWith("chrome-extension://")) {
+        return { ok: true, text: async () => read("prompts/translation.md") };
+      }
+      requests += 1;
+      return { ok: true, json: async () => ({ choices: [{ message: { content: "" } }] }) };
+    },
+  });
+  const result = await helpers.handleTranslateContent(
+    { segments: [{ id: "segment-0-0", text: "English source sentence." }] },
+    "transcriptBatch",
+    "zh",
+    "Video",
+  );
+  assert.equal(result.code, "EMPTY_AI_RESPONSE");
+  assert.equal(requests, 1);
+});
+
+test("OpenAI errors do not echo remote messages or try the DeepSeek key", async () => {
+  let requests = 0;
+  const helpers = loadBackgroundHelpers({
+    settings: { provider: "openai", openAiApiKey: "openai-test", aiApiKey: "deepseek-test" },
+    fetchImpl: async () => {
+      requests += 1;
+      return { ok: false, status: 401, json: async () => ({ error: { message: "OpenAI received openai-test" } }) };
+    },
+  });
+  const result = await helpers.callAiTranslation("Translate.", "Hello.");
+  assert.equal(result.error, "OpenAI rejected the API key. Check the key in Settings.");
+  assert.equal(requests, 1);
 });
 
 test("blank-line chunks reset provider idle timeout and valid JSON succeeds", async () => {

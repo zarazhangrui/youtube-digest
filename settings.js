@@ -6,11 +6,25 @@
  */
 var YTD_SETTINGS = (() => {
   const STORAGE_KEY = "ytd_settings";
+  const AI_PROVIDERS = Object.freeze({
+    deepseek: Object.freeze({
+      label: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      model: "deepseek-v4-flash",
+    }),
+    openai: Object.freeze({
+      label: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4.1-mini",
+    }),
+  });
+  const OPENAI_ORIGIN = "https://api.openai.com/*";
   const DEFAULTS = Object.freeze({
     provider: "deepseek",
     aiApiKey: "",
-    aiBaseUrl: "https://api.deepseek.com",
-    aiModel: "deepseek-v4-flash",
+    openAiApiKey: "",
+    aiBaseUrl: AI_PROVIDERS.deepseek.baseUrl,
+    aiModel: AI_PROVIDERS.deepseek.model,
     supadataApiKey: "",
   });
 
@@ -19,15 +33,21 @@ var YTD_SETTINGS = (() => {
   }
 
   function normalize(input = {}) {
+    input ??= {};
+    const provider = input.provider === "openai" ? "openai" : DEFAULTS.provider;
+    const { baseUrl, model } = AI_PROVIDERS[provider];
     return {
-      provider: DEFAULTS.provider,
+      provider,
+      // Keep the original aiApiKey field dedicated to DeepSeek.
       aiApiKey: isLegacyCustom(input)
         ? ""
         : typeof input.aiApiKey === "string"
           ? input.aiApiKey.trim()
           : "",
-      aiBaseUrl: DEFAULTS.aiBaseUrl,
-      aiModel: DEFAULTS.aiModel,
+      openAiApiKey:
+        typeof input.openAiApiKey === "string" ? input.openAiApiKey.trim() : "",
+      aiBaseUrl: baseUrl,
+      aiModel: model,
       supadataApiKey:
         typeof input.supadataApiKey === "string"
           ? input.supadataApiKey.trim()
@@ -42,8 +62,15 @@ var YTD_SETTINGS = (() => {
     };
   }
 
-  function chatCompletionsUrl() {
-    return `${DEFAULTS.aiBaseUrl}/chat/completions`;
+  function getAiApiKey(settings) {
+    return settings.provider === "openai"
+      ? settings.openAiApiKey
+      : settings.aiApiKey;
+  }
+
+  function chatCompletionsUrl(provider = DEFAULTS.provider) {
+    const config = provider === "openai" ? AI_PROVIDERS.openai : AI_PROVIDERS.deepseek;
+    return `${config.baseUrl}/chat/completions`;
   }
 
   function canonicalYouTubeUrl(videoId) {
@@ -57,6 +84,9 @@ var YTD_SETTINGS = (() => {
   return {
     STORAGE_KEY,
     DEFAULTS,
+    AI_PROVIDERS,
+    OPENAI_ORIGIN,
+    getAiApiKey,
     isLegacyCustom,
     normalize,
     migrateLegacyCustom,

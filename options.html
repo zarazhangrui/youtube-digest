@@ -37,9 +37,8 @@
         </div>
         <h1 data-i18n="heading">Bring your own API keys</h1>
         <p class="lede" data-i18n="lede">
-          Keys stay in this Chrome profile and are sent only to Supadata and
-          DeepSeek. This open-source extension has no developer server or
-          analytics.
+          Keys are stored in this Chrome profile and sent only to their
+          respective services.
         </p>
       </header>
 
@@ -75,16 +74,14 @@
 
         <section class="card">
           <h2 data-i18n="aiProvider">AI provider</h2>
-          <div
-            class="provider-summary"
-            aria-label="Supported AI provider"
-            data-i18n-aria-label="providerSummaryLabel"
-          >
-            <span class="provider-name">DeepSeek V4 Flash</span>
-            <span class="provider-badge" data-i18n="providerBadge"
-              >Supported in this version</span
-            >
-          </div>
+          <label for="provider" data-i18n="activeProvider">Active AI provider</label>
+          <select id="provider" name="provider">
+            <option value="deepseek">DeepSeek V4 Flash</option>
+            <option value="openai">OpenAI GPT-4.1 mini</option>
+          </select>
+          <p class="help" data-i18n="providerHelp">
+            Only the selected provider needs a key.
+          </p>
 
           <label for="aiApiKey" data-i18n="deepseekApiKeyLabel"
             >DeepSeek API key</label
@@ -98,10 +95,6 @@
             placeholder="Paste your DeepSeek key"
           />
           <p class="help">
-            <span data-i18n="deepseekHelp"
-              >YouTube Digest uses DeepSeek V4 Flash for overviews,
-              explanations, translation, and note polishing.</span
-            >
             <a
               href="https://platform.deepseek.com/api_keys"
               target="_blank"
@@ -110,10 +103,28 @@
               >Create a DeepSeek API key</a
             ><span data-i18n="deepseekHelpSuffix">.</span>
           </p>
+          <label for="openAiApiKey" data-i18n="openAiApiKeyLabel"
+            >OpenAI API key</label
+          >
+          <input
+            id="openAiApiKey"
+            name="openAiApiKey"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <p class="help">
+            <a
+              href="https://platform.openai.com/api-keys"
+              target="_blank"
+              rel="noreferrer"
+              data-i18n="openAiKeyLink"
+              >Create an OpenAI API key</a
+            >
+          </p>
           <div class="privacy-note" data-i18n="privacyNote">
-            When you use AI features, DeepSeek receives the video transcript
-            and relevant video context. Review DeepSeek's terms and pricing
-            before saving.
+            AI features send the relevant subtitles and video context to the
+            selected provider.
           </div>
         </section>
 
